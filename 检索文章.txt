@@ -1,0 +1,5 @@
+3.	YJ Zheng, JQ Wang, JY Xue. A-Team based supply chain management architecture. International Journal on Artificial Intelligence Tools, 2009, 18(6): 802-823. (SCI)
+4.	Xiao Meihua, Xue Jinyun. Formal Analysis of Cryptographic Protocols in an Algorithmic Knowledge Logic Framework. The Chinese Journal of Electronics(电子学报英文版)，2007(4): 701-706. (EI)
+5.	Zheng Yujun, Xue Jinyun. An A-Team Based Architecture for Constraint Programming，Lecture Notes in Artificial Intelligence, vol. 4088, 552-557, 2006, Springer.( SCI、EI)
+6.	Zheng Yujun, Xue Jinyun. Partially Introducing Formal Methods into Object-Oriented Development: case studies using a metrics-driven approach，Lecture Notes in Computer Sciences, vol.4085, 190-204, 2006..( SCI、EI)
+7.	YJ Zheng, JQ Wang, JY Xue. Agent Based Framework for Emergency Rescue and Assistance Planning, LNCS 4430, 70-81, 2007. (EI)

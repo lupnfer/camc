@@ -1,0 +1,925 @@
+// CAMCView.cpp : CCAMCView 类的实现
+//
+
+#include "stdafx.h"
+#include "CAMC.h"
+
+#include "CAMCDoc.h"
+#include "CAMCView.h"
+#include "Win32_Func.h"
+#include ".\camcview.h"
+#include "oxo_helper.h"
+#include "Dline.h"
+#include "Curve.h"
+#include "Rectangle.h"
+#include "CmdSelectionSet.h"
+#include "StdDefine.h"
+#include "BsplineCurve.h"
+#include "LayerCommand.h"
+#include "PaintBrush.h"
+#include <wintab.h>
+#include "CmdImgFillColor.h"
+#include "MainFrm.h"
+#include "StyleStrokeDB.h"
+#include "StrokeTransform.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+
+// CCAMCView
+
+IMPLEMENT_DYNCREATE(CCAMCView, CScrollView)
+
+BEGIN_MESSAGE_MAP(CCAMCView, CScrollView)
+	//{{AFX_MSG_MAP(CCAMCView)
+
+	ON_COMMAND(ID_RECTBUTTON, OnRectbutton)
+	ON_UPDATE_COMMAND_UI(ID_RECTBUTTON, OnUpdateRectbutton)
+	ON_COMMAND(ID_MAGICBUTTON, OnMagicbutton)
+	ON_UPDATE_COMMAND_UI(ID_MAGICBUTTON, OnUpdateMagicbutton)
+	ON_COMMAND(ID_PENBUTTON, OnPenbutton)
+	ON_UPDATE_COMMAND_UI(ID_PENBUTTON, OnUpdatePenbutton)
+	ON_COMMAND(ID_RUBBERBUTTON, OnRubberbutton)
+	ON_UPDATE_COMMAND_UI(ID_RUBBERBUTTON, OnUpdateRubberbutton)
+	ON_COMMAND(ID_ZOOMINBUTTON, OnZoominbutton)
+	ON_UPDATE_COMMAND_UI(ID_ZOOMINBUTTON, OnUpdateZoominbutton)
+	ON_COMMAND(ID_ZOOMOUTBUTTON, OnZoomoutbutton)
+	ON_UPDATE_COMMAND_UI(ID_ZOOMOUTBUTTON, OnUpdateZoomoutbutton)
+	ON_COMMAND(ID_LINEBUTTON, OnLinebutton)
+	ON_UPDATE_COMMAND_UI(ID_LINEBUTTON, OnUpdateLinebutton)
+	ON_COMMAND(ID_BSPLINEBUTTON, OnBsplinebutton)
+	ON_UPDATE_COMMAND_UI(ID_BSPLINEBUTTON, OnUpdateBsplinebutton)
+	ON_COMMAND(ID_CURVEBUTTON, OnCurvebutton)
+	ON_UPDATE_COMMAND_UI(ID_CURVEBUTTON, OnUpdateCurvebutton)
+	ON_COMMAND(ID_OBJECTBUTTON, OnObjectbutton)
+	ON_UPDATE_COMMAND_UI(ID_OBJECTBUTTON, OnUpdateObjectbutton)
+	ON_COMMAND(ID_MOVEBUTTON, OnMovebutton)
+	ON_UPDATE_COMMAND_UI(ID_MOVEBUTTON, OnUpdateMovebutton)
+	ON_COMMAND(ID_COLORPICKBUTTON, OnColorPickbutton)
+	ON_UPDATE_COMMAND_UI(ID_COLORPICKBUTTON, OnUpdateColorPickbutton)
+
+	ON_COMMAND(IDM_INSERT_POINT, OnInsertPoint)
+	ON_COMMAND(IDM_DELETE_POINT, OnDeletePoint)
+	ON_COMMAND(IDM_SELECT_POINT, OnPassingpointsSelect)
+	ON_COMMAND(IDM_END_POINTS, OnEndPoints)
+	ON_COMMAND(IDM_UPDATE_POINT, OnUpdatePoint)
+
+	ON_MESSAGE(WT_PACKET, OnWTPacket)
+    
+	ON_COMMAND(ID_FILE_PRINT, CScrollView::OnFilePrint)
+	ON_COMMAND(ID_FILE_PRINT_DIRECT, CScrollView::OnFilePrint)
+	ON_COMMAND(ID_FILE_PRINT_PREVIEW, CScrollView::OnFilePrintPreview)
+
+
+	ON_WM_VSCROLL()
+	ON_WM_HSCROLL()
+	ON_WM_MDIACTIVATE()
+	ON_WM_ACTIVATE()
+	ON_WM_LBUTTONDOWN()
+	ON_WM_LBUTTONUP()
+	ON_WM_MOUSEMOVE()
+	ON_WM_RBUTTONDOWN()
+	ON_COMMAND(ID_COLORSAMPING, OnColorsamping)
+	ON_COMMAND(ID_OBJECTPICK, OnObjectpick)
+	ON_WM_CREATE()
+
+		//}}AFX_MSG_MAP
+	// Standard printing commands
+	
+END_MESSAGE_MAP()
+
+// CCAMCView 构造/析构
+//==============================================================================
+CCAMCView::CCAMCView()
+{
+	// TODO: 在此处添加构造代码
+	m_CurrentTool= DEFAULT;
+	m_pCurrentDraw = NULL;
+	m_penState=0;	
+	m_pBrush=NULL;
+	
+}
+//==============================================================================
+CCAMCView::~CCAMCView()
+{
+}
+//==============================================================================
+BOOL CCAMCView::PreCreateWindow(CREATESTRUCT& cs)
+{
+	// TODO: 在此处通过修改 CREATESTRUCT cs 来修改窗口类或
+	// 样式
+	
+	return CScrollView::PreCreateWindow(cs);
+}
+
+// CCAMCView 绘制
+//==============================================================================
+void CCAMCView::OnDraw(CDC* pDC)
+{
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;
+
+	CDC MemDC; //首先定义一个显示设备对象
+	
+	CBitmap MemBitmap;//定义一个位图对象
+	CRect rect;
+	GetClientRect(&rect);
+	FCObjCanvas& objCanvas = pDoc->GetCanvas();
+	SIZE rcCanvas=objCanvas.GetCanvasScaledDimension();
+	if(rcCanvas.cx>rect.Width()){
+		rect.right=rcCanvas.cx;
+	}
+	if(rcCanvas.cy>rect.Height()){
+		rect.bottom=rcCanvas.cy;
+	}
+	//随后建立与屏幕显示兼容的内存显示设备
+	MemDC.CreateCompatibleDC(pDC);
+	//这时还不能绘图，因为没有地方画 ^_^
+	//下面建立一个与屏幕显示兼容的位图，至于位图的大小嘛，可以用窗口的大小
+	MemBitmap.CreateCompatibleBitmap(pDC,rect.Width(),rect.Height());
+
+	//将位图选入到内存显示设备中
+	//只有选入了位图的内存显示设备才有地方绘图，画到指定的位图上
+	CBitmap *pOldBit=MemDC.SelectObject(&MemBitmap);
+
+	//先用背景色将位图清除干净，这里我用的是白色作为背景
+	//你也可以用自己应该用的颜色
+	MemDC.FillSolidRect(0,0,rect.Width(),rect.Height(),RGB(180,183,182));
+	CBitmap* BitmapTemp = MemDC.GetCurrentBitmap();
+	SIZE SizeofLayer ;
+	SizeofLayer.cx = rect.Width();
+	SizeofLayer.cy = rect.Height(); 
+	SetScrollSizes(MM_TEXT,SizeofLayer);
+	DrawInMemory(&MemDC);
+	pDC->BitBlt(0,0,rect.Width(),rect.Height(),&MemDC,0,0,SRCCOPY);
+	MemBitmap.DeleteObject();
+	MemDC.DeleteDC();
+}
+//==============================================================================
+BOOL CCAMCView::OnEraseBkgnd(CDC* pDC)
+{
+	return TRUE;
+}
+//==============================================================================
+//所以绘制的工作都在这个函数里面进行
+void CCAMCView::DrawInMemory(CDC* pMemDC)
+{
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;
+
+	FCObjCanvas& objCanvas = pDoc->GetCanvas();
+	
+	SIZE m_size;
+	CRect rcView;
+	GetClientRect(&rcView);
+	m_size.cx = rcView.Width();
+	m_size.cy = rcView.Height();
+	CPoint pScroll = this->GetScrollPosition();
+	int nScrollX = pScroll.x;
+	int nScrollY = pScroll.y;
+	FCObjImage *pImgView = new FCObjImage();
+	objCanvas.MakeViewImage(nScrollX,nScrollY,m_size,FCObjImage::GetBGImage(),pImgView);
+	BITMAPINFO* pBmpInfo=(BITMAPINFO*)FLib_NewImgInfoWithPalette(*pImgView);
+	::StretchDIBits(pMemDC->m_hDC,						  // hDC
+								 nScrollX,				  // DestX
+								 nScrollY,				   // DestY
+								 pImgView->Width(),        // nDestWidth
+								 pImgView->Height(),       // nDestHeight
+								 0,						    // SrcX
+								 0,							// SrcY
+								 pImgView->Width(),         // nStartScan
+								 pImgView->Height(),		// nNumScans
+								 pImgView->GetMemStart(),   // lpBits
+								 pBmpInfo,					// lpBitsInfo
+								 DIB_RGB_COLORS,
+								 SRCCOPY);  
+	delete pImgView;
+	delete pBmpInfo;
+	FCObjSelect& objSelect=objCanvas.GetSelection();
+	if(objSelect.IsValidImage()){
+		SIZE rcCanvas=objCanvas.GetCanvasScaledDimension();		
+		POINT p=objCanvas.GetViewOffset(rcView.Size());
+		CRect rcViewCanvas(p,rcCanvas);;
+		//objSelect.SetGraphObjPos(p);
+		objSelect.DrawStep(pMemDC->m_hDC,objCanvas,rcViewCanvas);
+	}
+	if(m_pCurrentDraw!=NULL)
+	{
+		if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+			m_pCurrentDraw->Draw(pMemDC);
+		}
+	}
+}
+//==============================================================================
+void CCAMCView::OnInitialUpdate()
+{
+	CScrollView::OnInitialUpdate();
+	CSize sizeTotal;
+	// TODO: 计算此视图的合计大小
+	sizeTotal.cx = sizeTotal.cy = 100;
+	SetScrollSizes(MM_TEXT, sizeTotal);
+
+}
+//==============================================================================
+// CCAMCView 打印
+
+BOOL CCAMCView::OnPreparePrinting(CPrintInfo* pInfo)
+{
+	// 默认准备
+	return DoPreparePrinting(pInfo);
+}
+//==============================================================================
+void CCAMCView::OnBeginPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
+{
+	// TODO: 打印前添加额外的初始化
+}
+//==============================================================================
+void CCAMCView::OnEndPrinting(CDC* /*pDC*/, CPrintInfo* /*pInfo*/)
+{
+	// TODO: 打印后添加清除过程
+}
+//==============================================================================
+// CCAMCView 诊断
+
+#ifdef _DEBUG
+void CCAMCView::AssertValid() const
+{
+	CScrollView::AssertValid();
+}
+
+void CCAMCView::Dump(CDumpContext& dc) const
+{
+	CScrollView::Dump(dc);
+}
+
+CCAMCDoc* CCAMCView::GetDocument() const // 非调试版本是内联的
+{
+	ASSERT(m_pDocument->IsKindOf(RUNTIME_CLASS(CCAMCDoc)));
+	return (CCAMCDoc*)m_pDocument;
+}
+#endif //_DEBUG
+
+
+// CCAMCView 消息处理程序
+
+
+void CCAMCView::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	// TODO: Add your message handler code here and/or call default
+//	Invalidate();
+
+	CScrollView::OnVScroll(nSBCode, nPos, pScrollBar);
+}
+
+void CCAMCView::OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar)
+{
+	// TODO: Add your message handler code here and/or call default
+	//Invalidate();
+
+	CScrollView::OnHScroll(nSBCode, nPos, pScrollBar);
+}
+
+
+void CCAMCView::OnMDIActivate(BOOL bActivate, CWnd* pActivateWnd, CWnd* pDeactivateWnd)
+{
+	CScrollView::OnMDIActivate(bActivate, pActivateWnd, pDeactivateWnd);
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;
+	pDoc->Activate();
+	// TODO: 在此处添加消息处理程序代码
+}
+
+void CCAMCView::OnActivate(UINT nState, CWnd* pWndOther, BOOL bMinimized)
+{
+	CScrollView::OnActivate(nState, pWndOther, bMinimized);
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;
+	pDoc->Activate();
+	// TODO: 在此处添加消息处理程序代码
+}
+void CCAMCView::OnRectbutton()
+{
+	m_CurrentTool=SELECTSQUARE_TOOL;
+
+
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+	
+}
+void CCAMCView::OnUpdateRectbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==SELECTSQUARE_TOOL?1:0);
+}
+void CCAMCView::OnPenbutton()
+{
+	m_CurrentTool=PEN_TOOL;
+	
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+
+
+}
+void CCAMCView::OnUpdatePenbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==PEN_TOOL?1:0);
+
+}
+void CCAMCView::OnMagicbutton()
+{
+
+	m_CurrentTool=SELECTMAGICWAND_TOOL;
+
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),TRUE,false);
+	
+}
+void CCAMCView::OnUpdateMagicbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==SELECTMAGICWAND_TOOL?1:0);
+}
+void CCAMCView::OnRubberbutton()
+{
+	m_CurrentTool=ERASE_TOOL;
+
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+}
+void CCAMCView::OnUpdateRubberbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==ERASE_TOOL?1:0);
+
+}
+void CCAMCView::OnZoominbutton()
+{
+	m_CurrentTool=ZOOM_IN_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+
+
+}
+void CCAMCView::OnUpdateZoominbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==ZOOM_IN_TOOL?1:0);
+
+}
+void CCAMCView::OnZoomoutbutton()
+{
+	m_CurrentTool=ZOOM_OUT_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+}
+void CCAMCView::OnUpdateZoomoutbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==ZOOM_OUT_TOOL?1:0);
+
+}
+void CCAMCView::OnLinebutton()
+{
+	m_CurrentTool=LINE_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+}
+void CCAMCView::OnUpdateLinebutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==LINE_TOOL?1:0);
+
+}
+void CCAMCView::OnBsplinebutton()
+{
+	m_CurrentTool=BSPLINE_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+}
+void CCAMCView::OnUpdateBsplinebutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==BSPLINE_TOOL?1:0);
+}
+void CCAMCView::OnCurvebutton()
+{
+	m_CurrentTool=CURVE_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+	m_pBrush=NULL;
+
+}
+void CCAMCView::OnUpdateCurvebutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==CURVE_TOOL?1:0);
+
+}
+
+void CCAMCView::OnColorPickbutton()
+{
+	m_CurrentTool = COLORPICK_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+}
+void CCAMCView::OnUpdateColorPickbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==COLORPICK_TOOL?1:0);
+
+}
+void CCAMCView::OnObjectbutton()
+{
+	m_CurrentTool=OBJECT_TOOL;
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_none),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_pen),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_color),TRUE,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_linerelated),false,false);
+	pFrame->ShowControlBar(&(pFrame->m_dlgbar_magic),false,false);
+
+}
+void CCAMCView::OnUpdateObjectbutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool==OBJECT_TOOL?1:0);
+
+}
+
+void CCAMCView::OnLButtonDown(UINT nFlags, CPoint point)
+{
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	CClientDC dc(this);
+	OnPrepareDC(&dc);
+	dc.DPtoLP(&point);
+	m_pCurrentDraw=NULL;
+	switch(m_CurrentTool) {
+	case SELECTSQUARE_TOOL:
+		m_pCurrentDraw = CRectangle::Instance();
+		m_pCurrentDraw->OnLButtonDown(&dc,this,point);
+		break;
+	case LINE_TOOL:
+		m_pCurrentDraw = CDLine::Instance();
+		m_pCurrentDraw->m_PenWidth = pFrame->m_dlgbar_linerelated.m_penwidth;
+		m_pCurrentDraw->m_PenColor = pFrame->m_dlgbar_color.m_color;
+		m_pCurrentDraw->OnLButtonDown(&dc,this,point);	
+		break;
+	case ERASE_TOOL:
+		m_pCurrentDraw = CCurve::Instance();
+	
+		m_pCurrentDraw->m_PenStyle=PS_DOT;
+		m_pCurrentDraw->m_PenWidth = pFrame->m_dlgbar_linerelated.m_penwidth;
+		m_pCurrentDraw->m_PenColor = RGB(255,255,255);
+		m_pCurrentDraw->OnLButtonDown(&dc,this,point);	
+		break;
+	case CURVE_TOOL:
+		m_pCurrentDraw = CCurve::Instance();
+		m_pCurrentDraw->m_PenWidth = pFrame->m_dlgbar_linerelated.m_penwidth;
+		m_pCurrentDraw->m_PenColor = pFrame->m_dlgbar_color.m_color;
+
+		m_pCurrentDraw->OnLButtonDown(&dc,this,point);	
+		break;
+	case BSPLINE_TOOL:	
+		m_pCurrentDraw=CBsplineCurve::Instance();
+		if(m_pCurrentDraw->IsEnd(BSPLINE_TOOL)==false){
+			m_pCurrentDraw->OnLButtonDown(&dc,this,point);
+			break;
+		}
+		m_pCurrentDraw->Initial();
+		m_pCurrentDraw->m_PenWidth = pFrame->m_dlgbar_linerelated.m_penwidth;
+		m_pCurrentDraw->m_PenColor = pFrame->m_dlgbar_color.m_color;
+		m_pCurrentDraw->SetGraphObjPos(GetCanvasOffset().x,GetCanvasOffset().y);
+		m_pCurrentDraw->OnLButtonDown(&dc,this,point);
+		break;
+	case ZOOM_IN_TOOL:
+		ZOOM_IN();
+		break;
+	case ZOOM_OUT_TOOL:
+		ZOOM_OUT();
+		break;
+	case SELECTMAGICWAND_TOOL:
+		MagicWand(point,pFrame->m_dlgbar_magic.m_threshold);
+		break;
+	case COLORBASESDIMP:
+		Objectpick(point,pFrame->m_dlgbar_magic.m_threshold);
+		break;
+	case MOVE_TOOL:
+		MoveLayer(point);
+		break;
+	case COLORPICK_TOOL:
+		
+		break;
+	case SELECT_TOOL:
+		ObjectSelect(point,&dc);
+		break;
+	case OBJECT_TOOL:
+		
+		FilledColor(point,pFrame->m_dlgbar_color.m_color);
+		break;
+
+	default:break;
+	}
+
+	CScrollView::OnLButtonDown(nFlags, point);
+}
+
+void CCAMCView::OnLButtonUp(UINT nFlags, CPoint point)
+{
+	// TODO: Add your message handler code here and/or call default
+	CClientDC dc(this);
+	OnPrepareDC(&dc);
+	dc.DPtoLP(&point);
+	if(m_pCurrentDraw!=NULL)
+		m_pCurrentDraw->OnLButtonUp(&dc,this,point);
+	Invalidate();
+	CScrollView::OnLButtonUp(nFlags, point);
+}
+
+void CCAMCView::OnMouseMove(UINT nFlags, CPoint point)
+{
+	// TODO: Add your message handler code here and/or call default
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	CClientDC dc(this);
+	OnPrepareDC(&dc);
+	dc.DPtoLP(&point);
+	if(m_pCurrentDraw!=NULL)
+		m_pCurrentDraw->OnMouseMove(&dc,this,point);
+	if(m_CurrentTool==OBJECT_TOOL){
+		
+		SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR1));
+
+	}
+	if(m_CurrentTool==ERASE_TOOL){
+		if (pFrame->m_dlgbar_linerelated.m_penwidth<5) 
+		{
+			SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR3));
+
+		}
+		if ((pFrame->m_dlgbar_linerelated.m_penwidth<10)&&(pFrame->m_dlgbar_linerelated.m_penwidth>=5) ) 
+		{
+			SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR6));
+
+		}
+		if ((pFrame->m_dlgbar_linerelated.m_penwidth<15)&&(pFrame->m_dlgbar_linerelated.m_penwidth>=10) ) 
+		{
+			SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR4));
+
+		}
+		if ((pFrame->m_dlgbar_linerelated.m_penwidth<20)&&(pFrame->m_dlgbar_linerelated.m_penwidth>=15) ) 
+		{
+			SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR2));
+
+		}
+		if ((pFrame->m_dlgbar_linerelated.m_penwidth>=20) ) 
+		{
+			SetCursor(AfxGetApp()->LoadCursor(IDC_CURSOR5));
+
+		}
+
+	}
+	CScrollView::OnMouseMove(nFlags, point);
+}
+void CCAMCView::MagicWand(CPoint point,int Threshold)
+{	
+	FCObjCanvas& objCanvas = GetCanvas();
+	objCanvas.MapRealPoint (point);
+	if (objCanvas.HasSelected()) {
+		objCanvas.__ClearSelection();
+	}
+	POINT ptoffset = GetCanvasOffset();
+	objCanvas.MapRealPoint(ptoffset);
+	point.x = point.x - ptoffset.x;
+	point.y = point.y - ptoffset.y ;
+
+	CMDIFrameWnd *pFrame = (CMDIFrameWnd*)AfxGetApp()->m_pMainWnd;
+	CMDIChildWnd *pChild = (CMDIChildWnd *) pFrame->GetActiveFrame();
+	CCAMCDoc* pDoc =(CCAMCDoc*)(pChild->GetActiveDocument());
+	int i = pDoc->GetLayerBar()->m_ListBox.GetCurSel();
+	FCObjLayer *pLayer = pDoc->GetCanvas().GetLayer(i);
+	//FCObjLayer *pLayer = objCanvas.GetCurrentLayer();
+	FCObjSelect fobjSelect;
+	fobjSelect.Create(pLayer->Width(),pLayer->Height(),8);
+	fobjSelect.SetMagicWand(point.x,point.y,Threshold,*pLayer,TRUE,FCObjSelect::RGN_CREATE);	
+	objCanvas.ExecuteEffect(new CCmdSelectionSet(fobjSelect));
+
+}
+void CCAMCView::ZOOM_IN()
+{
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;	
+	pDoc->OnZoomin();
+	pDoc->UpdateAllViews(NULL);
+}
+void CCAMCView::ZOOM_OUT()
+{
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);
+	if (!pDoc)
+		return;	
+
+//	CString  temp;
+//	temp.Format("缩小了%d倍",4);
+//	pDoc->m_progressbar.SetText(temp);
+
+	pDoc->OnZoomout();
+	pDoc->UpdateAllViews(NULL);
+}
+void CCAMCView::OnMovebutton()
+{
+	m_CurrentTool=MOVE_TOOL;
+}
+void CCAMCView::OnUpdateMovebutton(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(m_CurrentTool == MOVE_TOOL?1:0);
+}
+void CCAMCView::MoveLayer(CPoint point)
+{
+	CClientDC dc(this);
+	OnPrepareDC(&dc);
+	dc.DPtoLP(&point);
+	POINT ptoffset = GetCanvasOffset();
+	point.x = point.x - ptoffset.x;
+	point.y = point.y - ptoffset.y ;
+
+	FCObjCanvas& objCanvas = GetCanvas();
+	FCObjLayer * pLayer = objCanvas.GetCurrentLayer();
+	objCanvas.ExecuteEffect(new FCCmdLayerMove(pLayer,point));
+}
+//---------------------------------------------------------------------
+//选定作图对象，主要实现了风格笔划的选择，其他如直线等没有实现。
+void CCAMCView::ObjectSelect(CPoint point,CDC* pDC)
+{
+	CCAMCDoc* pDoc = GetDocument();
+	if (!pDoc)
+		return;	
+	CSketch* pSketch=pDoc->GetCurrentSketch();
+	FCObjCanvas& objCanvas = GetCanvas();
+	LPToCP(point);
+	FCObjLayer* pLayer=objCanvas.GetCurrentLayer();
+	POINT p;
+	p.x=point.x;
+	p.y=point.y;
+	objCanvas.CanvasToLayerPoint(*pLayer,p);
+	m_pBrush->SetStroke(pSketch->GetStrokeInRgn(p));
+	m_pBrush->ShowSelectPoint(pDC,this,pLayer);
+}
+void CCAMCView::LPToCP(POINT& point)
+{
+	FCObjCanvas& objCanvas = GetCanvas();
+	POINT p=GetCanvasOffset();
+	point.x-=p.x;
+	point.y-=p.y;
+	objCanvas.MapRealPoint(point);
+}
+void CCAMCView::CPToLP(POINT& point)
+{
+	FCObjCanvas& objCanvas = GetCanvas();
+	objCanvas.MapRealPoint(point);
+	POINT p=GetCanvasOffset();
+	point.x+=p.x;
+	point.y+=p.y;
+}
+
+POINT CCAMCView::GetCanvasOffset()
+{
+	CRect rect;
+	GetClientRect(&rect);
+	FCObjCanvas& objCanvas = GetCanvas();
+	POINT ptoffset = objCanvas.GetViewOffset(rect.Size());
+	return ptoffset;
+}
+FCObjCanvas& CCAMCView::GetCanvas()
+{
+	CCAMCDoc* pDoc = GetDocument();
+	ASSERT_VALID(pDoc);	
+	return pDoc->GetCanvas();	
+}
+void CCAMCView::OnRButtonDown(UINT nFlags, CPoint point)
+{
+	// TODO: 在此添加消息处理程序代码和/或调用默认值
+	CClientDC dc(this);
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL&&m_CurrentTool==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnRButtonDown(&dc,this,point);
+	}
+	CScrollView::OnRButtonDown(nFlags, point);
+}
+
+//--------------------------------------------------
+//响应B样条曲线绘制的命令
+void CCAMCView::OnInsertPoint()
+{
+	// TODO: Add your command handler code here
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnInsertPoint(this);
+	}
+}
+
+void CCAMCView::OnDeletePoint()
+{
+	// TODO: Add your command handler code here
+		// TODO: Add your command handler code here
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnDeletePoint(this);
+	}
+}
+
+void CCAMCView::OnPassingpointsSelect()
+{
+		// TODO: Add your command handler code here
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnPassingpointsSelect(this);
+	}
+}
+
+void CCAMCView::OnEndPoints()
+{
+	// TODO: Add your command handler code here
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnEndPoints(this);
+		this->m_pCurrentDraw=NULL;
+	}
+	Invalidate();
+}
+void CCAMCView::OnUpdatePoint()
+{
+	// TODO: Add your command handler code here
+	if(m_pCurrentDraw==NULL)
+		return;
+	if(m_pCurrentDraw->IsClassType()==BSPLINE_TOOL){
+		CBsplineCurve* bs=static_cast<CBsplineCurve*>(m_pCurrentDraw);
+		bs->OnUpdatePoint(this);
+	}
+}
+//------------------------------------------------------------
+
+void CCAMCView::OnColorsamping()
+{
+	// TODO: Add your command handler code here
+	m_CurrentTool = COLORBASESDIMP;
+}
+void CCAMCView::Objectpick(CPoint point,int Threshold)
+{
+	FCObjCanvas& objCanvas = GetCanvas();
+	objCanvas.MapRealPoint (point);
+	if (objCanvas.HasSelected()) {
+		objCanvas.__ClearSelection();
+	}
+	POINT ptoffset = GetCanvasOffset();
+	objCanvas.MapRealPoint(ptoffset);
+	point.x = point.x - ptoffset.x;
+	point.y = point.y - ptoffset.y ;
+
+	CMDIFrameWnd *pFrame = (CMDIFrameWnd*)AfxGetApp()->m_pMainWnd;
+	CMDIChildWnd *pChild = (CMDIChildWnd *) pFrame->GetActiveFrame();
+	CCAMCDoc* pDoc =(CCAMCDoc*)(pChild->GetActiveDocument());
+	int i = pDoc->GetLayerBar()->m_ListBox.GetCurSel();
+	FCObjLayer *pLayer = pDoc->GetCanvas().GetLayer(i);
+	//FCObjLayer *pLayer = objCanvas.GetCurrentLayer();
+	FCObjSelect fobjSelect;
+	fobjSelect.Create(pLayer->Width(),pLayer->Height(),pLayer->ColorBits());
+	fobjSelect.SetMagicWand(point.x,point.y,Threshold,*pLayer,TRUE,FCObjSelect::RGN_CREATE);	
+	objCanvas.ExecuteEffect(new CCmdSelectionSet(fobjSelect));
+	objCanvas.CopyToClipboard();
+	objCanvas.PasteFromClipboard();
+}
+void CCAMCView::FilledColor(CPoint point,COLORREF color)
+{
+
+
+	FCObjCanvas& objCanvas = GetCanvas();
+	objCanvas.MapRealPoint (point);
+	
+	POINT ptoffset = GetCanvasOffset();
+	objCanvas.MapRealPoint (ptoffset);
+	
+	point.x = point.x - ptoffset.x;
+	point.y = point.y - ptoffset.y ;
+
+	objCanvas.ExecuteEffect(new CCmdImgFillColor(point,color));
+
+}
+void CCAMCView::OnObjectpick()
+{
+	// TODO: Add your command handler code here
+	m_CurrentTool=COLORBASESDIMP;
+
+}
+
+int CCAMCView::OnCreate(LPCREATESTRUCT lpCreateStruct)
+{
+	if (CScrollView::OnCreate(lpCreateStruct) == -1)
+		return -1;
+
+	// TODO:  在此添加您专用的创建代码
+	m_wt.Init(m_hWnd);
+	return 0;
+}
+LRESULT CCAMCView::OnWTPacket(WPARAM wSerial, LPARAM hCtx)
+{
+	CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+
+	unsigned int penState=m_wt.ParsePacket(wSerial,hCtx);
+	//CSinleLock lock( pWTMutex, TRUE );
+	CClientDC dc(this);
+	OnPrepareDC(&dc);
+	CPoint point(m_wt.GetPoint());
+	ScreenToClient(&point);
+	dc.DPtoLP(&point);
+	if(penState){
+		if(m_penState){
+			if(m_pBrush!=NULL&&m_CurrentTool==PEN_TOOL)
+				m_pBrush->OnMouseMove(&dc,this,point);
+		}else{
+			if(m_CurrentTool==PEN_TOOL){
+				m_pBrush=CPaintBrush::Instance();
+				m_pBrush->m_PenWidth = pFrame->m_dlgbar_pen.m_penwidth;
+				m_pBrush->m_PenColor = pFrame->m_dlgbar_color.m_color;
+				m_wt.SetMaxWidth(m_pBrush->m_PenWidth);
+				
+				if(m_wt.IsErase())
+					m_pBrush->m_PenColor=RGB(255,255,255);
+				m_pBrush->OnLButtonDown(&dc,this,point);
+			}
+		}
+	}
+	if(m_CurrentTool==PEN_TOOL&&penState==0&&m_penState!=0){
+		m_pBrush->OnLButtonUp(&dc,this,point);
+	}
+	m_penState=penState;
+	return true;
+}
+
+
+

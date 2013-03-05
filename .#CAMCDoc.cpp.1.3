@@ -1,0 +1,932 @@
+// CAMCDoc.cpp :  CCAMCDoc 类的实现
+//
+
+#include "stdafx.h"
+#include "CAMC.h"
+#include "math.h"
+#include "CAMCDoc.h"
+#include ".\camcdoc.h"
+#include "ObjImage.h"
+#include "ObjCanvas.h"
+#include "ObjLayer.h"
+#include "MainFrm.h"
+#include "FCSinglePixelProcessBase.h"
+#include "LayerCommand.h"
+#include "FCCmdSmartLayerBase.h"
+#include "NewDlg.h"
+#include "FCCmdLayerMerge.h"
+#include "layerpropertydlg.h"
+#include "DlgBrightnessAdjust.h"
+#include "CmdImgBlur_Zoom.h"
+#include "CmdImgCannyEdge.h"
+#include "CmdImgMselEdge.h"
+#include "DlgCannyEdge.h"
+#include "ProgressBar.h"
+#include "ObjProgress.h"
+#include "CmdImgRas2Vec.h"
+#include "FCCmdCanvasRotate.h"
+#include "CmdImgRemoveNoise.h"
+#include "DlgRemoveNoise.h"
+#include "math.h"
+#include "Image.h"
+#include "BigImg.h"
+#include "ImageStore.h"
+#include "iostream"
+#include "cmdImgRepair.h"
+#include "ColorDBManagerDlg.h"
+#include "StyleStrokeDB.h"
+#include "StrokeTransform.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+
+
+
+IMPLEMENT_DYNCREATE(CCAMCDoc, CDocument)
+
+BEGIN_MESSAGE_MAP(CCAMCDoc, CDocument)
+
+	ON_COMMAND(ID_NEWLAYER, OnNewlayer)
+	//ON_COMMAND(ID_POPNEWLAYER, OnNewlayer)
+	//ON_COMMAND(ID_FILE_OPEN, OnFileOpen)
+	ON_COMMAND(ID_DELLAYER, OnDellayer)
+	ON_COMMAND(ID_MERGESELLAYERS, OnMergesellayers)
+	ON_COMMAND(ID_MERGEDOWNLAYER, OnMergedownlayer)
+	ON_COMMAND(ID_MERGEALLLAYERS, OnMergealllayers)
+	ON_UPDATE_COMMAND_UI(ID_DELLAYER, OnUpdateDellayer)
+
+	ON_UPDATE_COMMAND_UI(ID_MERGEALLLAYERS, OnUpdateMergealllayers)
+	ON_COMMAND(ID_IMPORTIMAGE, OnImportimage)
+	ON_UPDATE_COMMAND_UI(ID_IMPORTIMAGE, OnUpdateImportimage)
+	ON_COMMAND(ID_LAYERPROPERTY, OnLayerproperty)
+	ON_UPDATE_COMMAND_UI(ID_MERGEDOWNLAYER, OnUpdateMergedownlayer)
+	ON_UPDATE_COMMAND_UI(ID_MERGESELLAYERS, OnUpdateMergesellayers)
+	ON_COMMAND(ID_BRIGHTADJUST, OnBrightadjust)
+	ON_UPDATE_COMMAND_UI(ID_BRIGHTADJUST, OnUpdateBrightadjust)
+	ON_COMMAND(ID__ROTATECANVAS, OnRotateCanvas)
+	ON_COMMAND(ID__ROTATELAYER, OnRotateLayer)
+	ON_UPDATE_COMMAND_UI(ID__ROTATECANVAS, OnUpdateRotateCanvas)
+	ON_UPDATE_COMMAND_UI(ID__ROTATELAYER, OnUpdateRotateLayer)
+	ON_COMMAND(ID_ZOOMIN, OnZoomin)
+	ON_UPDATE_COMMAND_UI(ID_ZOOMIN, OnUpdateZoomin)
+	ON_COMMAND(ID_ZOOMOUT, OnZoomout)
+	ON_UPDATE_COMMAND_UI(ID_ZOOMOUT, OnUpdateZoomout)
+	ON_COMMAND(ID_FILE_SAVE, OnFileSave)
+	ON_COMMAND(ID_CANNYEDGE, OnCannyedge)
+	ON_UPDATE_COMMAND_UI(ID_CANNYEDGE, OnUpdateCannyedge)
+	ON_COMMAND(ID_MSELEDGE, OnMseledge)
+	ON_UPDATE_COMMAND_UI(ID_MSELEDGE, OnUpdateMseledge)
+	ON_COMMAND(ID_RAS2VEC, OnRas2vec)
+	ON_UPDATE_COMMAND_UI(ID_RAS2VEC, OnUpdateRas2vec)
+	ON_COMMAND(ID_EDIT_UNDO, OnEditUndo)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_UNDO, OnUpdateEditUndo)
+	ON_COMMAND(ID_EDIT_REDO, OnEditRedo)
+	ON_UPDATE_COMMAND_UI(ID_EDIT_REDO, OnUpdateEditRedo)
+	ON_COMMAND(ID_EDIT_CUT, OnEditCut)
+	ON_COMMAND(ID_EDIT_COPY, OnEditCopy)
+	ON_COMMAND(ID_EDIT_PASTE, OnEditPaste)
+	ON_COMMAND(ID_FILE_SAVEVISIBLE, OnFileSavevisible)
+	ON_COMMAND(ID_REMOVENOISE, OnRemovenoise)
+	//ON_COMMAND(ID_CIRCLE_RMNOISE, OnCircleRmnoise)
+	ON_COMMAND(ID_IMPORTSKETCH, OnImportsketch)
+	ON_COMMAND(ID_OUTPUTSKETCH, OnOutputsketch)
+	ON_COMMAND(ID_AUTOCANNY, OnAutocanny)
+	ON_COMMAND(ID_Repair, OnRepair)
+	ON_COMMAND(ID_ADDSTYLESTROKE, OnAddstylestroke)
+END_MESSAGE_MAP()
+
+
+// CCAMCDoc 构造/析构
+
+CCAMCDoc::CCAMCDoc()
+{
+	// TODO: 在此添加一次性构造代码
+
+	SIZE          sizeCanvas = {800, 600} ;
+    m_fcObjCanvas.SetCanvasDimension (sizeCanvas);
+	CMainFrame* frame=(CMainFrame*)AfxGetApp()->m_pMainWnd;
+	m_fcLayerBar=&(frame->m_fcLayerBar);
+	m_pBigImg=NULL;
+	m_pColorDlg=NULL;
+	IsAuto = FALSE;
+}
+
+CCAMCDoc::~CCAMCDoc()
+{
+	m_fcLayerBar=NULL;
+}
+//==============================================================================
+BOOL CCAMCDoc::OnNewDocument()
+{
+	if (!CDocument::OnNewDocument())
+		return FALSE;
+	CNewDlg newDlg;
+	if(newDlg.DoModal()==IDOK){
+		int dpi=newDlg.GetDPI();
+		SIZE size;
+		size.cx=newDlg.GetWidth();
+		size.cy=newDlg.GetHigh();
+		m_fcObjCanvas.SetCanvasDimension(size);
+		m_fcObjCanvas.SetCanvasResolution(dpi,dpi);
+		m_fcLayerBar->SetCanvas(&m_fcObjCanvas);
+		OnNewlayer();
+		//m_fcLayerBar->InitImageList();
+	}else return false;
+	return true;
+}
+//打开一个新的画布
+BOOL CCAMCDoc::OnOpenDocument(LPCTSTR lpszPathName)
+{
+	m_fcLayerBar->SetCanvas(&m_fcObjCanvas);
+	if(OpenBigImage(lpszPathName))
+		return TRUE;	
+	OnNewlayer();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetCurrentLayer();
+	if(pLayer==NULL)
+		return false;
+	if (!pLayer->Load (lpszPathName))
+	{
+		delete pLayer;
+		return false;
+	}
+	pLayer ->ConvertTo32Bit();
+//按照读入图像大小，重新设置画布大小
+	SIZE size;
+	size.cx=pLayer->Width();
+	size.cy=pLayer->Height();
+	m_fcObjCanvas.SetCanvasDimension(size);
+	m_fcLayerBar->SetCanvas(&m_fcObjCanvas);
+	m_fcLayerBar->InitImageList();
+//缩放到合适大小
+	if (size.cx>800||size.cy>600) {
+		int zoomrate = FMax(((size.cx/800)),((size.cy/600)));	
+		zoomrate=zoomrate*(-1);
+		m_fcObjCanvas.SetZoomScale(zoomrate-1);
+		
+
+
+		CString  temp;
+		temp.Format("缩小了%d倍",zoomrate*(-1));
+		
+		CMainFrame* mf=(CMainFrame*)AfxGetMainWnd();
+		mf->m_wndStatusBar.SetPaneText(0,temp);
+
+	}
+	return true;
+}
+// CCAMCDoc 序列化
+
+void CCAMCDoc::Serialize(CArchive& ar)
+{
+	if (ar.IsStoring())
+	{
+		// TODO: 在此添加存储代码
+	}
+	else
+	{
+		// TODO: 在此添加加载代码
+	}
+}
+
+
+// CCAMCDoc 诊断
+
+#ifdef _DEBUG
+void CCAMCDoc::AssertValid() const
+{
+	CDocument::AssertValid();
+}
+
+void CCAMCDoc::Dump(CDumpContext& dc) const
+{
+	CDocument::Dump(dc);
+}
+#endif //_DEBUG
+
+
+// CCAMCDoc 命令
+
+//==============================================================================
+void CCAMCDoc::OnNewlayer()
+{
+	// TODO: 在此添加命令处理程序代码
+	FCObjLayer* layer=new FCObjLayer();
+	layer->Create(m_fcObjCanvas.GetCanvasDimension().cx,
+					m_fcObjCanvas.GetCanvasDimension().cy,32);
+	m_fcObjCanvas.ExecuteEffect (new FCCmdLayerAdd (layer, -1));
+	m_fcLayerBar->Add(*layer);
+}
+//==============================================================================
+void CCAMCDoc::OnDellayer()
+{
+	// TODO: Add your command handler code here
+	int nLayerSelectNum = m_fcLayerBar->m_ListBox.GetCurSel();
+	if(nLayerSelectNum == 0)
+		{
+			AfxMessageBox("背景层不能删除！",MB_OK);
+			return ;
+		}
+	FCObjLayer* layer=m_fcObjCanvas.GetLayer(nLayerSelectNum);
+	if(layer != NULL){
+		m_fcObjCanvas.ExecuteEffect (new FCCmdLayerRemove (layer));
+		m_fcLayerBar->InitImageList();
+		this->UpdateAllViews(NULL);
+		//m_fcLayerBar->Delete(nLayerSelectNum);
+	}
+	else
+		return;
+}
+//==============================================================================
+void CCAMCDoc::OnMergesellayers()
+{
+	// TODO: Add your command handler code here
+	int nTotalNum = m_fcLayerBar->m_ListBox.GetCount();
+	int nVisualLayerNum = 0;
+	for(int i =0;i <nTotalNum; i++)
+	{
+		FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+		if(pLayer->GetLayerVisible()==TRUE)
+		{
+			nVisualLayerNum ++;
+		}
+}
+	int *arIndex = new int [nVisualLayerNum];
+	int j=0;
+	for(int i = 0; i< nTotalNum; i++)
+	{
+		FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+		if(pLayer->GetLayerVisible()==TRUE)
+		{
+			arIndex[j] = i ;
+			j++ ;
+		}
+      }
+	m_fcObjCanvas.ExecuteEffect(new FCCmdLayerMerge(arIndex,j));
+	for(int k = j-1;k > 0;k -- )
+		{
+			m_fcLayerBar->Delete(arIndex[k]);
+		}
+	delete[] arIndex;
+	arIndex=NULL;
+}
+//==============================================================================
+void CCAMCDoc::OnMergedownlayer()
+{
+	// TODO: Add your command handler code here
+	int nSeletedNum = m_fcLayerBar->m_ListBox.GetCurSel();
+	int nDownNum = nSeletedNum -1;
+	int		* arIndex = new int[2] ;
+	arIndex[0] = nSeletedNum;
+	arIndex[1] = nDownNum;
+	m_fcObjCanvas.ExecuteEffect(new FCCmdLayerMerge(arIndex , 2));
+	int j;
+	for(j = nSeletedNum; j > nDownNum ; j--)
+	{
+		m_fcLayerBar->Delete(j);
+	}
+	delete[] arIndex;
+	arIndex=NULL;
+}
+//==============================================================================
+void CCAMCDoc::OnMergealllayers()
+{
+	// TODO: Add your command handler code here
+	int     nTotalLayerNum = m_fcObjCanvas.GetLayerNumber();
+	int		* arIndex = new int[nTotalLayerNum] ;
+	int     i,j ;
+	for (i= 0 ; i <nTotalLayerNum ; i++)
+		arIndex[i] = i ;
+	m_fcObjCanvas.ExecuteEffect (new FCCmdLayerMerge (arIndex , nTotalLayerNum));
+	for(j = nTotalLayerNum; j > 0 ; j--)
+	{
+		m_fcLayerBar->Delete(j);
+	}
+	delete[] arIndex;
+	arIndex=NULL;
+}
+//==============================================================================
+void CCAMCDoc::OnUpdateDellayer(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() <= 1)
+		pCmdUI->Enable(FALSE);
+}
+//==============================================================================
+void CCAMCDoc::OnUpdateMergealllayers(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() <= 1)
+		pCmdUI->Enable(FALSE);
+}
+//==============================================================================
+void CCAMCDoc::OnImportimage()
+{
+	// TODO: Add your command handler code here
+	char szFilters[]=
+		"位图(*.bmp)|所有文件 (*.*)|*.*||";
+	CFileDialog fileDlg (TRUE, "edge", "*.bmp",
+		OFN_FILEMUSTEXIST| OFN_HIDEREADONLY, szFilters,NULL);
+	BOOL bResult=FALSE;
+	if (fileDlg.DoModal() == IDOK)
+	{
+		CString path = fileDlg.GetPathName();
+		CString fileName = fileDlg.GetFileName();
+		int nLayerSelectNum = m_fcLayerBar->m_ListBox.GetCurSel();
+		FCObjLayer* pLayer=m_fcObjCanvas.GetLayer(nLayerSelectNum);
+		CPoint point = pLayer->GetGraphObjPos();
+		if (!pLayer->Load (fileName))
+		{
+			delete pLayer;
+			return ;
+		}
+		pLayer ->ConvertTo32Bit();
+		pLayer->SetGraphObjPos(point);
+
+		m_fcObjCanvas.ExecuteEffect( new FCCmdLayerAdd (pLayer, -1));		
+		m_fcLayerBar->FlushLayerThumbnail(m_fcObjCanvas.GetCurrentLayerIndex());
+		UpdateAllViews(NULL);
+	}
+}
+//==============================================================================
+void CCAMCDoc::OnUpdateImportimage(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() <= 1)
+		pCmdUI->Enable(FALSE);
+}
+//==============================================================================
+void CCAMCDoc::OnLayerproperty()
+{
+	// TODO: Add your command handler code here
+	CLayerPropertyDlg dlg;
+	dlg.DoModal();
+}
+//==============================================================================
+void CCAMCDoc::OnCloseDocument()
+{
+	// TODO: Add your specialized code here and/or call the base class
+	m_fcLayerBar->SetCanvas(NULL);
+	m_fcLayerBar->ClearImageList();
+	CDocument::OnCloseDocument();
+}
+//==============================================================================
+void CCAMCDoc::OnUpdateMergedownlayer(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() <= 1)
+		pCmdUI->Enable(FALSE);
+
+}
+//==============================================================================
+void CCAMCDoc::OnUpdateMergesellayers(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() <= 1)
+		pCmdUI->Enable(FALSE);
+}
+
+
+
+void CCAMCDoc::OnBrightadjust()
+{
+	// TODO: Add your command handler code here
+	CDlgBrightnessAdjust dlg;
+	dlg.DoModal();
+}
+
+void CCAMCDoc::OnUpdateBrightadjust(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::OnRotateCanvas()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.ExecuteEffect(new FCCmdCanvasRotate(m_fcObjCanvas,45));
+	UpdateAllViews(NULL);
+
+}
+
+void CCAMCDoc::OnRotateLayer()
+{
+	// TODO: Add your command handler code here
+	
+	int i = m_fcLayerBar->m_ListBox.GetCurSel();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+	m_fcObjCanvas.ExecuteEffect(new FCCmdLayerRotate(pLayer,45));
+	UpdateAllViews(NULL);
+
+}
+
+void CCAMCDoc::OnUpdateRotateCanvas(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() < 1)
+		pCmdUI->Enable(FALSE);
+
+}
+
+void CCAMCDoc::OnUpdateRotateLayer(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	if(m_fcObjCanvas.GetLayerNumber() < 1)
+		pCmdUI->Enable(FALSE);
+
+}
+
+void CCAMCDoc::OnZoomin()
+{
+	m_fcObjCanvas.SetZoomIn();
+}
+
+void CCAMCDoc::OnUpdateZoomin(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	
+}
+
+void CCAMCDoc::OnZoomout()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.SetZoomOut();
+}
+
+void CCAMCDoc::OnUpdateZoomout(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::OnFileSave()
+{
+	// TODO: Add your command handler code here
+	OnMergealllayers();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetCurrentLayer();
+	CFileDialog fileDlg(false,".bmp","*.bmp",OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,"bmp files (*.bmp)|所有文件(*.*)||");
+	if(fileDlg.DoModal()==IDOK){
+		pLayer->Save(fileDlg.GetFileName());
+	}
+	
+}
+
+void CCAMCDoc::OnCannyedge()
+{
+	// TODO: Add your command handler code here
+	CDlgCannyEdge dlgCanny;
+	if(dlgCanny.DoModal()==IDOK)
+	{
+		m_fcObjCanvas.ExecuteEffect(new CCmdImgCannyEdge(dlgCanny.GetMinThreshold(),dlgCanny.GetMaxThreshold(),dlgCanny.GetDeviation()));
+	}
+	m_fcLayerBar->InitImageList();
+	this->UpdateAllViews(NULL);
+}
+
+void CCAMCDoc::OnUpdateCannyedge(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::OnMseledge()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.ExecuteEffect(new CCmdImgMselEdge());
+
+}
+
+void CCAMCDoc::OnUpdateMseledge(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::Activate()
+{
+	m_fcLayerBar->SetCanvas(&m_fcObjCanvas);
+	m_fcLayerBar->InitImageList();
+}
+
+void CCAMCDoc::OnRas2vec()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.ExecuteEffect(new CCmdImgRas2Vec());
+
+}
+
+void CCAMCDoc::OnUpdateRas2vec(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::OnEditUndo()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.Undo();
+	m_fcLayerBar->InitImageList();
+	UpdateAllViews(NULL);
+}
+
+void CCAMCDoc::OnUpdateEditUndo(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+}
+
+void CCAMCDoc::OnEditRedo()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.Redo();
+	m_fcLayerBar->InitImageList();
+	UpdateAllViews(NULL);
+}
+
+void CCAMCDoc::OnUpdateEditRedo(CCmdUI *pCmdUI)
+{
+	// TODO: Add your command update UI handler code here
+	
+}
+
+void CCAMCDoc::OnEditCut()
+{
+	// TODO: Add your command handler code here
+	int i = m_fcLayerBar->m_ListBox.GetCurSel();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+	FCObjImage ImgMask8;
+	ImgMask8.Create(pLayer->Width(),pLayer->Height(),8);
+	CRect rcLayer = CRect(0,0,pLayer->Width(),pLayer->Height());
+	m_fcObjCanvas.ExecuteEffect(new FCCmdLayerCrop(pLayer,&ImgMask8,rcLayer));
+	
+}
+
+void CCAMCDoc::OnEditCopy()
+{
+	m_fcObjCanvas.CopyToClipboard ();
+}
+
+void CCAMCDoc::OnEditPaste()
+{
+	// TODO: Add your command handler code here
+	m_fcObjCanvas.PasteFromClipboard ();
+}
+
+
+void CCAMCDoc::OnFileSavevisible()
+{
+	// TODO: Add your command handler code here
+	OnMergesellayers();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetCurrentLayer();
+	CFileDialog fileDlg(false,".bmp","*.bmp",OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,"bmp files (*.bmp)|所有文件(*.*)||");
+	if(fileDlg.DoModal()==IDOK){
+		pLayer->Save(fileDlg.GetFileName());
+	}
+
+}
+BOOL CCAMCDoc::OpenBigImage(LPCTSTR lpszPathName)
+{
+	CFile file;
+	CFileException fe;
+	BOOL bResult=FALSE;
+	LPCTSTR path=lpszPathName;
+	// 打开文件
+	if (!file.Open(path, CFile::modeRead | CFile::shareDenyWrite, &fe))
+	{
+		// 失败
+		ReportSaveLoadException(path, &fe,
+			FALSE, AFX_IDP_FAILED_TO_OPEN_DOC);
+
+		// 返回FALSE
+		return FALSE;
+	}
+
+	DeleteContents();
+
+	// 更改光标形状
+	BeginWaitCursor();
+
+	// 尝试调用ReadDIBFile()读取图像
+	TRY
+	{
+		CMainFrame* frame=(CMainFrame*)AfxGetApp()->m_pMainWnd;
+		ULONGLONG dwLength = file.GetLength();
+		if(dwLength>MAX_BMP_SIZE){
+			m_pBigImg=new CBigImg();
+			CString tmp;
+			tmp.Format("%s\\图片",frame->m_path);
+			m_pBigImg->SetPath(tmp,frame->m_dbPath);	
+			bResult=m_pBigImg->Load(&file);
+			if(frame->m_pPreviewDlg->IsWindowVisible()==false){
+				frame->OnPreviewdlg();
+			}else 
+				frame->m_pPreviewDlg->Invalidate();
+		}else return false;
+	}
+	CATCH (CFileException, eLoad)
+	{
+		// 读取失败
+		file.Abort();
+
+		// 恢复光标形状
+		EndWaitCursor();
+
+		// 报告失败
+		ReportSaveLoadException(path, eLoad,
+			FALSE, AFX_IDP_FAILED_TO_OPEN_DOC);
+		return FALSE;
+	}
+	END_CATCH
+
+		// 恢复光标形状
+		EndWaitCursor();
+
+	// 判断读取文件是否成功
+	if (bResult==FALSE)
+	{
+		// 失败，可能非BMP格式
+		CString strMsg;
+		strMsg = "读取图像时出错！可能是不支持该类型的图像文件！";
+
+		// 提示出错
+		MessageBox(NULL, strMsg, "系统提示", MB_ICONINFORMATION | MB_OK);
+
+		// 返回FALSE
+		return FALSE;
+	}
+	return TRUE;	
+}
+//==============================================================================
+void CCAMCDoc::ImportFromImage(CImage* img)
+{
+	OnNewlayer();
+	FCObjLayer* pLayer=m_fcObjCanvas.GetCurrentLayer();
+	if (!pLayer->Load (img))
+	{
+		delete pLayer;
+		return ;
+	}
+	pLayer ->ConvertTo32Bit();
+	m_fcLayerBar->FlushLayerThumbnail(m_fcObjCanvas.GetCurrentLayerIndex());
+}
+//=====================================================
+void CCAMCDoc::OnRemovenoise()
+{
+	CDlgRemoveNoise dlgRmNoise;
+	FCObjProgress percent;
+	if(dlgRmNoise.DoModal()==IDOK)
+	{
+		int i = m_fcLayerBar->m_ListBox.GetCurSel();
+		FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+		m_fcObjCanvas.ExecuteEffect(new CCmdImgRemoveNoise(dlgRmNoise.GetMinRadio(),dlgRmNoise.GetMaxRadio()),&percent);
+	}
+	this->UpdateAllViews(NULL);
+
+}
+
+
+
+void CCAMCDoc::OnImportsketch()
+{
+	// TODO: 在此添加命令处理程序代码
+	// TODO: Add your command handler code here
+
+	CFileDialog fileDlg(TRUE,"xml","*",OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,"xml files (*.xml)|所有文件(*.*)||");
+
+	BOOL bResult=FALSE;
+	if (fileDlg.DoModal() == IDOK)
+	{
+		CString path = fileDlg.GetPathName();
+		CString fileName = fileDlg.GetFileName();
+		int nLayerSelectNum = m_fcLayerBar->m_ListBox.GetCurSel();
+		FCObjLayer* pLayer=m_fcObjCanvas.GetLayer(nLayerSelectNum);
+		CPoint point = pLayer->GetGraphObjPos();
+		FCObjProgress percent;
+		if (!pLayer->LoadSketch(fileName,&percent))
+		{
+			return ;
+		}
+		m_fcLayerBar->FlushLayerThumbnail(m_fcObjCanvas.GetCurrentLayerIndex());
+		UpdateAllViews(NULL);
+	}	
+}
+
+void CCAMCDoc::OnOutputsketch()
+{
+	// TODO: 在此添加命令处理程序代码
+		// TODO: Add your command handler code here
+
+	
+	CFileDialog fileDlg(false,"xml","*",OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT,"xml files (*.xml)|所有文件(*.*)||");
+
+	BOOL bResult=FALSE;
+	if (fileDlg.DoModal() == IDOK)
+	{
+		CString path = fileDlg.GetPathName();
+		CString fileName = fileDlg.GetFileName();
+		int nLayerSelectNum = m_fcLayerBar->m_ListBox.GetCurSel();
+		FCObjLayer* pLayer=m_fcObjCanvas.GetLayer(nLayerSelectNum);
+		CPoint point = pLayer->GetGraphObjPos();
+		pLayer->SaveSketch(fileName);
+	}	
+}
+
+void CCAMCDoc::OnAutocanny()
+{
+	// TODO: Add your command handler code here
+
+	float fmin = 0.0;
+	float fmax = 0.2;
+	int   ndev = 1;
+	IsAuto = TRUE;
+	for(ndev = 1; ndev < 10; ndev ++)
+		{
+			while((fmin<fmax))
+			{
+				FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(0);
+				CCmdImgCannyEdge *canny = new CCmdImgCannyEdge(fmin,fmax,ndev);
+				canny->Implement(*pLayer,NULL);
+				fmin = fmin + 0.02;
+				fmax = fmax - 0.02;
+				m_fcLayerBar->InitImageList();
+				this->UpdateAllViews(NULL);
+			}
+			fmin = 0.0;
+			fmax = 0.1;
+		}
+
+	for(int j = 1; j < 31; j ++)
+	{
+		FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(j);
+		int nWidth = pLayer->Width();
+		int nHeight = pLayer->Height();
+		BYTE rval = 0;
+		BYTE gval = 0;
+		BYTE bval = 0;
+		double numblackpoint=0;
+		for(int y = 0; y < nHeight; y++)
+			for(int x = 0; x < nWidth; x++)
+			{
+				pLayer->GetPixel(x,y,rval,gval,bval);
+				if ((rval==0)&&(gval==0)&&(bval==0)) {
+						numblackpoint++;
+				}
+			}
+			Vecelement nele;
+			nele.nindex = j;
+			nele.num = numblackpoint;
+			m_vecpoint.push_back(nele);
+			numblackpoint = 0;
+
+	}
+	VecelementList::iterator it;
+	VecelementList::iterator it2;
+	double maxpoint = 0;
+	for(it = m_vecpoint.begin();it!= m_vecpoint.end();it++)
+		{
+			Vecelement ele = *(it);
+			maxpoint = ele.num;
+			int index = ele.nindex;
+			for(it2 = m_vecpoint.begin(); it2 != m_vecpoint.end(); it2++)
+			{
+				Vecelement ele2 = *(it2);
+				
+				if (ele2.num>maxpoint)	
+				{
+					Vecelement temp;
+					temp = *(it);
+					*(it) = *(it2);
+					*(it2) = temp;
+					maxpoint = ele2.num;
+				
+				}
+				
+			}
+		}
+
+		if(AfxMessageBox("确实要计算机自动选择删除",MB_OKCANCEL)==IDOK)
+			{
+				for(it = m_vecpoint.end()-9;it>= m_vecpoint.begin();it--)
+					{
+						Vecelement ele3 = *(it);
+						
+						FCObjLayer* layer=m_fcObjCanvas.GetLayer(ele3.nindex);
+						layer->m_rv = TRUE;
+					}
+
+				for(int k = m_fcObjCanvas.GetLayerNumber()-1;k>0;k--)
+					{
+						FCObjLayer* layer=m_fcObjCanvas.GetLayer(k);
+						if(layer->m_rv == TRUE){
+							m_fcObjCanvas.ExecuteEffect (new FCCmdLayerRemove (layer));
+
+						}
+
+					}
+					m_fcLayerBar->InitImageList();
+					this->UpdateAllViews(NULL);
+			}
+	
+
+//按照噪声
+			
+				int radio1 = 7;
+				int radio2 = 9;
+				int sum = 0;
+				VecelementList m_vecnoisepoint;
+				CCmdImgRemoveNoise rmnoise(radio1,radio2);
+						for(int h = 1; h <= 8;h ++)
+						{
+							sum  = 0;
+							FCObjLayer* layer=m_fcObjCanvas.GetLayer(h);
+							for(int y = 0; y<layer->Height();y=y+1)
+								for(int x= 0; x<layer->Width();x=x+1)
+								{
+									BYTE* bpPixel = layer->GetBits(x,y);
+
+									if((bpPixel[0]!=255)||(bpPixel[1]!=255)||(bpPixel[2]!=255))//除去白色之外的点作为要处理的目标
+									{
+										if (rmnoise.Is_Noise(*layer,x,y,radio1,radio1+2)) {
+											 sum ++;
+											
+										}
+									}
+								}
+							Vecelement nelenoise;
+							nelenoise.nindex = h;
+							nelenoise.num = sum;
+							m_vecnoisepoint.push_back(nelenoise);
+						}
+				//对m_vecnoisepoint排序
+						for(it = m_vecnoisepoint.begin();it!= m_vecnoisepoint.end();it++)
+						{
+							Vecelement ele = *(it);
+							maxpoint = ele.num;
+							int index = ele.nindex;
+							for(it2 = m_vecnoisepoint.begin(); it2 != m_vecnoisepoint.end(); it2++)
+							{
+								Vecelement ele2 = *(it2);
+
+								if (ele2.num>maxpoint)	
+								{
+									Vecelement temp;
+									temp = *(it);
+									*(it) = *(it2);
+									*(it2) = temp;
+									maxpoint = ele2.num;
+
+								}
+
+							}
+						}
+						for(it = m_vecnoisepoint.begin();it!= m_vecnoisepoint.end();it++)
+						{
+							Vecelement ele6 = *(it);
+							int cd = ele6.nindex;
+							int dccc = ele6.num;
+						}
+						if(AfxMessageBox("确实要计算机继续自动选择删除",MB_OKCANCEL)==IDOK)
+						{
+							for(it = m_vecnoisepoint.begin()+4; it != m_vecnoisepoint.end(); it++)
+							{
+								Vecelement ele3 = *(it);
+
+								FCObjLayer* layer=m_fcObjCanvas.GetLayer(ele3.nindex);
+								layer->m_rv = TRUE;
+							}
+
+							for(int k = m_fcObjCanvas.GetLayerNumber()-1;k>0;k--)
+							{
+								FCObjLayer* layer=m_fcObjCanvas.GetLayer(k);
+								if(layer->m_rv == TRUE){
+									m_fcObjCanvas.ExecuteEffect (new FCCmdLayerRemove (layer));
+
+								}
+
+							}
+							m_fcLayerBar->InitImageList();
+							this->UpdateAllViews(NULL);
+						}
+
+
+}
+
+void CCAMCDoc::OnRepair()
+{
+	// TODO: Add your command handler code here
+	int i = m_fcLayerBar->m_ListBox.GetCurSel();
+	FCObjLayer *pLayer = m_fcObjCanvas.GetLayer(i);
+	m_fcObjCanvas.ExecuteEffect(new CCmdImgRepair());
+	this->UpdateAllViews(NULL);
+}
+CSketch* CCAMCDoc::GetCurrentSketch()
+{
+	FCObjLayer *pLayer=m_fcObjCanvas.GetCurrentLayer();
+	return pLayer->GetSketch();
+}
+void CCAMCDoc::OnAddstylestroke()
+{	
+	CSketch* pSketch=GetCurrentSketch();
+	if(pSketch==NULL)
+		return;
+	CBCStroke* pStroke=pSketch->GetCurrentStroke();
+	StyleStroke* pSS=new StyleStroke();
+	pSS->m_stroke=new CBCStroke(*pStroke);
+	CStrokeTransform::GenDistanceParamList(pStroke,pSS->m_distParamList);
+	CStyleStrokeDB::Instance()->AddStyleStroke(pSS);
+}

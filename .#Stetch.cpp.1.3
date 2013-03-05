@@ -1,0 +1,739 @@
+#include "StdAfx.h"
+#include ".\stetch.h"
+#include "objImage.h"
+#include "BCStroke.h"
+#include "MainFrm.h"
+#include "DH2Paper.h"
+
+CSketch::CSketch(void)
+{
+}
+
+CSketch::~CSketch(void)
+{
+	SKETCH::iterator it;
+	for(it=m_sketch.begin();it!=m_sketch.end();++it){
+		delete *it;
+	}
+}
+/*
+ *zoom_img:图像的放大倍数
+ *zoom_strokewidth：线宽的放大倍数
+ *img:背景图像
+ */
+void CSketch::ToImage(FCObjImage& img,float zoom_img,float zoom_strokewidth,FCObjProgress * progress)
+{	
+	//img.Stretch(m_width*zoom_img,m_height*zoom_img);
+	SKETCH::iterator it;
+			// 遍历处理区域像素
+    if (progress != NULL)
+        progress->ResetProgress() ; // reset to 0
+	int size=m_sketch.size();
+	int i=0;
+	for(it=m_sketch.begin();it!=m_sketch.end();++it,++i){
+		(*it)->Draw(img,zoom_img);		
+		if (progress != NULL)
+			progress->SetProgress ( i* 100 / size) ;
+	}
+}
+	
+BOOL CSketch::Load(CString fileName)
+{
+	HRESULT hr;
+	hr = CoInitialize(NULL);//初始化com
+
+	CComPtr<IXMLDOMDocument> spXMLDOM;
+	hr = spXMLDOM.CoCreateInstance(
+		__uuidof(DOMDocument));
+	if ( FAILED(hr) ) 
+		throw "Unable to create XML parser object";
+	if ( spXMLDOM.p == NULL ) 
+		throw "Unable to create XML parser object";
+	if(SUCCEEDED(hr)) 
+	{
+		VARIANT_BOOL bSuccess = false;
+		hr=spXMLDOM->load(CComVariant(fileName), &bSuccess);//将把 XML 文档加载到分析器中
+		if ( FAILED(hr) ) 
+			throw "Unable to load XML document into the parser";
+		if ( !bSuccess ) 
+			throw "Unable to load XML document into the parser";
+
+	}
+	CComBSTR bstrItemText;
+	char * buf = NULL;
+	//线描图/宽度
+	CComBSTR bstrSS_Sketch_Width(L"线描图/宽度");	
+	CComPtr<IXMLDOMNode> spXMLNode_Sketch_Width;
+	hr = spXMLDOM->selectSingleNode(bstrSS_Sketch_Width,&spXMLNode_Sketch_Width);
+	hr = spXMLNode_Sketch_Width->get_text(&bstrItemText.m_str);
+	buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+	int nwidth =atoi(buf);
+	m_width = nwidth;
+	//线描图/高度
+	CComBSTR bstrSS_Sketch_Height(L"线描图/高度");	
+	CComPtr<IXMLDOMNode> spXMLNode_Sketch_Height;
+	hr = spXMLDOM->selectSingleNode(bstrSS_Sketch_Height,&spXMLNode_Sketch_Height);
+	hr = spXMLNode_Sketch_Height->get_text(&bstrItemText.m_str);
+	buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+	int nheight =atoi(buf);
+	m_height = nheight;
+
+
+	IXMLDOMNodeList* pIDOMStrokeChildNodeList = NULL;//每一笔的childlist
+	IXMLDOMNodeList* pIDOMManyStrokeChildNodeList = NULL;//线描笔划的childlist
+	IXMLDOMNodeList* pIDOMChildNodeList = NULL;
+	long longvalue;
+	int nvalue;
+
+	//CBCStroke* cbstroke=new CBCStroke();
+
+
+
+	CString strpen ;
+	BezierPressCurve bezpCurve;
+	bezpCurve.bezCurve = (Point2 *)malloc((unsigned)((4) * sizeof (Point2)));
+
+	//线描笔划
+	CComBSTR bstrSS_Stroke(L"线描图/线描笔划");	
+	CComPtr<IXMLDOMNode> spXMLNode_Stroke;
+	hr = spXMLDOM->selectSingleNode(bstrSS_Stroke,&spXMLNode_Stroke);
+	CComQIPtr<IXMLDOMElement> spXMLElement_Stroke;
+	spXMLElement_Stroke = spXMLNode_Stroke;
+	VARIANT strstrokenum;
+	hr = spXMLElement_Stroke->getAttribute(CComBSTR(L"count"),&strstrokenum);
+	CComBSTR str=strstrokenum.bstrVal;
+	buf = _com_util::ConvertBSTRToString(str.m_str); 
+	int num =atoi(buf);
+	//得到线描笔划下的childlist;			
+	hr = spXMLNode_Stroke->get_childNodes(&pIDOMManyStrokeChildNodeList);
+
+	if (SUCCEEDED(hr)) {
+		pIDOMManyStrokeChildNodeList->get_length(&longvalue);
+	}			
+
+
+
+
+
+
+	for(int k = 0; k < num; k++)
+	{
+
+		CBCStroke* cbstroke=new CBCStroke();
+		//得到笔划下的轨迹数目即bezier的条数
+		cbstroke->Init(m_pPaper,RGB(0,0,0));
+		CComPtr<IXMLDOMNode> spXMLNode_StrokeIndex;
+		pIDOMManyStrokeChildNodeList->get_item(k,&spXMLNode_StrokeIndex);
+		CComQIPtr<IXMLDOMElement> spXMLElement_StrokeIndex;
+		spXMLElement_StrokeIndex = spXMLNode_StrokeIndex;
+		VARIANT strbeziernum;
+		hr = spXMLElement_Stroke->getAttribute(CComBSTR(L"count"),&strbeziernum);
+		str=strbeziernum.bstrVal;
+		buf = _com_util::ConvertBSTRToString(str.m_str); 
+		int beziernum =atoi(buf);
+
+
+		//得到stroke的颜色
+
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Color;
+		hr = spXMLElement_StrokeIndex->get_firstChild(&spXMLChildNode_Stroke_Color);
+		hr = spXMLChildNode_Stroke_Color->get_text(&bstrItemText.m_str);
+		buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+		int color = atoi(buf);
+		cbstroke->SetColor((COLORREF)color);
+
+
+		//得到stroke的区域属性
+		//CComBSTR bstrSS_Stroke_Rect(L"线描图/线描笔划/笔划/区域");	
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Rect;
+		hr = spXMLChildNode_Stroke_Color->get_nextSibling(&spXMLChildNode_Stroke_Rect);
+		CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Rect;
+		spXMLElement_Stroke_Rect = spXMLChildNode_Stroke_Rect;
+		VARIANT L,R,T,B;
+		hr = spXMLElement_Stroke_Rect->getAttribute(CComBSTR(L"L"),&L);
+		hr = spXMLElement_Stroke_Rect->getAttribute(CComBSTR(L"R"),&R);
+		hr = spXMLElement_Stroke_Rect->getAttribute(CComBSTR(L"T"),&T);
+		hr = spXMLElement_Stroke_Rect->getAttribute(CComBSTR(L"B"),&B);
+
+		CComBSTR strL=L.bstrVal;
+		CComBSTR strR=R.bstrVal;
+		CComBSTR strT=T.bstrVal;
+		CComBSTR strB=B.bstrVal;
+
+		buf  = _com_util::ConvertBSTRToString(strL.m_str); 
+		int lvalue =atoi(buf);
+		buf = _com_util::ConvertBSTRToString(strR.m_str); 
+		int rvalue =atoi(buf);
+		buf = _com_util::ConvertBSTRToString(strT.m_str); 
+		int tvalue =atoi(buf);
+		buf = _com_util::ConvertBSTRToString(strB.m_str); 
+		int bvalue =atoi(buf);
+		cbstroke->SetRect(CRect(lvalue,tvalue,rvalue,bvalue));
+
+		//得到stroke的笔触
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_PenStyle;
+		hr = spXMLChildNode_Stroke_Rect->get_nextSibling(&spXMLChildNode_Stroke_PenStyle);
+		hr = spXMLChildNode_Stroke_PenStyle->get_text(&bstrItemText.m_str);
+		buf = _com_util::ConvertBSTRToString(bstrItemText.m_str); 
+
+		CMainFrame *pFrame = (CMainFrame*)AfxGetApp()->m_pMainWnd;
+		
+		if (strcmp(buf,"circle")==0) {
+			cbstroke->Init(CDHPaper::Instance(),(COLORREF)color);
+		}
+		else
+		{
+			cbstroke->Init(CDH2Paper::Instance(),(COLORREF)color);
+		}
+
+
+		//得到笔划下的childlist;			
+		hr = spXMLNode_StrokeIndex->get_childNodes(&pIDOMStrokeChildNodeList);
+
+		if (SUCCEEDED(hr)) {
+			pIDOMStrokeChildNodeList->get_length(&longvalue);
+		}			
+
+		nvalue = (int)longvalue;
+
+		for(int l = 3; l < nvalue; l++)
+		{
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier;
+			pIDOMStrokeChildNodeList->get_item(l,&spXMLChildNode_Stroke_Bezier);
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_ControlPoints;
+			hr = spXMLChildNode_Stroke_Bezier->get_firstChild(&spXMLChildNode_Stroke_Bezier_ControlPoints);
+			hr = spXMLChildNode_Stroke_Bezier_ControlPoints->get_childNodes(&pIDOMChildNodeList);
+			if (SUCCEEDED(hr)) {
+				pIDOMChildNodeList->get_length(&longvalue);
+			}			
+
+			for(int kk = 0; kk < 4; kk++)
+			{
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_ControlPoints_Point;
+				pIDOMChildNodeList->get_item(kk,&spXMLChildNode_Stroke_Bezier_ControlPoints_Point);
+				CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier_ControlPoints_Point;
+				spXMLElement_Stroke_Bezier_ControlPoints_Point= spXMLChildNode_Stroke_Bezier_ControlPoints_Point;
+				VARIANT strpoint_x,strpoint_y;
+				hr = spXMLElement_Stroke_Bezier_ControlPoints_Point->getAttribute(CComBSTR(L"x"),&strpoint_x);
+				hr = spXMLElement_Stroke_Bezier_ControlPoints_Point->getAttribute(CComBSTR(L"y"),&strpoint_y);
+				str=strpoint_x.bstrVal;
+				buf = _com_util::ConvertBSTRToString(str.m_str); 
+				int npoint_x =atoi(buf);
+				str = strpoint_y.bstrVal;
+				buf = _com_util::ConvertBSTRToString(str.m_str);
+				int npoint_y = atoi(buf);
+				bezpCurve.bezCurve[kk].x = npoint_x;
+				bezpCurve.bezCurve[kk].y = npoint_y;
+
+			}
+
+
+			//得到每条bezier参数的个数
+
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters;
+			hr = spXMLChildNode_Stroke_Bezier->get_lastChild(&spXMLChildNode_Stroke_Bezier_Parameters);
+			CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier_Parameters;
+			spXMLElement_Stroke_Bezier_Parameters = spXMLChildNode_Stroke_Bezier_Parameters;
+			VARIANT strparanum;
+			hr = spXMLElement_Stroke_Bezier_Parameters->getAttribute(CComBSTR(L"count"),&strparanum);
+			str=strparanum.bstrVal;
+			buf = _com_util::ConvertBSTRToString(str.m_str); 
+			int paranum =atoi(buf);
+
+			//得到参数的childList;
+			hr = spXMLChildNode_Stroke_Bezier_Parameters->get_childNodes(&pIDOMChildNodeList);
+			if (SUCCEEDED(hr)) {
+				pIDOMChildNodeList->get_length(&longvalue);
+			}	
+
+
+			float nuvalue = 0;
+			int nangleZvalue=0;
+			int npressvalue=0;
+			int nangleXYvalue = 0;
+
+			for(int kk = 0; kk < paranum; kk++)
+			{
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_U;
+				pIDOMChildNodeList->get_item(4*kk,&spXMLChildNode_Stroke_Bezier_Parameters_U);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_U->get_text(&bstrItemText.m_str);
+				buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+				nuvalue =atof(buf);
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_Press;
+				pIDOMChildNodeList->get_item(4*kk+1,&spXMLChildNode_Stroke_Bezier_Parameters_Press);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_Press->get_text(&bstrItemText.m_str);
+				buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+				npressvalue =atof(buf);
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_angle_xy;
+				pIDOMChildNodeList->get_item(4*kk+2,&spXMLChildNode_Stroke_Bezier_Parameters_angle_xy);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_angle_xy->get_text(&bstrItemText.m_str);
+				buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+				nangleXYvalue =atof(buf);
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_angle_z;
+				pIDOMChildNodeList->get_item(4*kk+3,&spXMLChildNode_Stroke_Bezier_Parameters_angle_z);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_angle_z->get_text(&bstrItemText.m_str);
+				buf = _com_util::ConvertBSTRToString(bstrItemText.m_str);
+				nangleZvalue =atof(buf);
+
+				PARAMER p;
+				p.u = nuvalue;
+				p.m_angle_xy = nangleXYvalue;
+				p.m_angle_z = nangleZvalue;
+				p.press = npressvalue;
+				bezpCurve.uList.push_back(p);
+
+			}	
+
+			cbstroke->AddBezierCurve(3,bezpCurve.bezCurve,bezpCurve.uList);
+
+
+		}
+		m_sketch.push_back(cbstroke);
+	}
+	free(bezpCurve.bezCurve);
+	bezpCurve.bezCurve=NULL;
+	return true;
+}
+void CSketch::Save(CString fileName)
+{
+	HRESULT hr;
+	hr = CoInitialize(NULL);//初始化com
+
+	CComPtr<IXMLDOMDocument> spXMLDOM;
+	hr = spXMLDOM.CoCreateInstance(
+		__uuidof(DOMDocument));
+	if ( FAILED(hr) ) 
+		throw "Unable to create XML parser object";
+	if ( spXMLDOM.p == NULL ) 
+		throw "Unable to create XML parser object";
+	if(SUCCEEDED(hr)) 
+	{
+		VARIANT_BOOL bSuccess = false;
+		CString xmlfileTemplete;
+		CMainFrame* frame=(CMainFrame*)AfxGetApp()->m_pMainWnd;
+		xmlfileTemplete.Format("%s\\SketchXmlTemplete.xml",frame->m_path);
+		hr=spXMLDOM->load(CComVariant(xmlfileTemplete), &bSuccess);//将把 XML 文档加载到分析器中
+		if ( FAILED(hr) ) 
+			throw "Unable to load XML document into the parser";
+		if ( !bSuccess ) 
+			throw "Unable to load XML document into the parser";
+
+	}
+
+	CComBSTR bstrSS(L"线描图");
+	CComPtr<IXMLDOMNode> spXMLNode;
+	hr = spXMLDOM->selectSingleNode(bstrSS,&spXMLNode);
+	if ( FAILED(hr) ) 
+		throw "Unable to locate 'xmlnode' XML node";
+	if ( spXMLNode.p == NULL ) 
+		throw "Unable to locate 'xmlnode' XML node";
+
+
+
+	CComBSTR bstrChildSS_CAVEID(L"线描图/洞库号");
+	CComPtr<IXMLDOMNode> spXMLChildNode_CAVEID;
+	hr = spXMLDOM->selectSingleNode(bstrChildSS_CAVEID,&spXMLChildNode_CAVEID);
+	CString strID="205"; 
+	hr = spXMLChildNode_CAVEID->put_text(CComBSTR(strID.AllocSysString()));
+
+
+	CComBSTR bstrChildSS_CAVETHEME(L"线描图/主题");
+	CComPtr<IXMLDOMNode> spXMLChildNode_CAVETHEME;
+	hr = spXMLDOM->selectSingleNode(bstrChildSS_CAVETHEME,&spXMLChildNode_CAVETHEME);
+	CString strTheme = "说经图";
+	hr = spXMLChildNode_CAVETHEME->put_text(CComBSTR(strID.AllocSysString()));
+
+
+
+	CComBSTR bstrChildSS_WIDTH(L"线描图/宽度");	
+	CComPtr<IXMLDOMNode> spXMLChildNode_WIDTH;
+	hr = spXMLDOM->selectSingleNode(bstrChildSS_WIDTH,&spXMLChildNode_WIDTH);
+	int nWidth = this->Width();
+	CString strwidth;
+	strwidth.Format("%d",nWidth);
+	hr = spXMLChildNode_WIDTH->put_text(CComBSTR(strwidth.AllocSysString()));
+
+
+	CComBSTR bstrChildSS_HEIGHT(L"线描图/高度");	
+	CComPtr<IXMLDOMNode> spXMLChildNode_HEIGHT;
+	hr = spXMLDOM->selectSingleNode(bstrChildSS_HEIGHT,&spXMLChildNode_HEIGHT);
+	int nHeight = this->Height();
+	CString strHeight;
+	strHeight.Format("%d",nHeight);
+	hr = spXMLChildNode_HEIGHT->put_text(CComBSTR(strHeight.AllocSysString()));
+
+	CComBSTR bstrSS_Stroke(L"线描图/线描笔划");	
+	CComPtr<IXMLDOMNode> spXMLNode_Stroke;
+	hr = spXMLDOM->selectSingleNode(bstrSS_Stroke,&spXMLNode_Stroke);
+	CComQIPtr<IXMLDOMElement> spXMLElement_Stroke;
+	spXMLElement_Stroke = spXMLNode_Stroke;
+	int nStrokeNum = m_sketch.size();
+	if ( spXMLElement_Stroke.p == NULL ) 
+		throw "Unable to query for 'xmlchildnode' XML element interface";
+	hr = spXMLElement_Stroke->setAttribute(CComBSTR(L"count"),CComVariant(nStrokeNum));
+	if ( FAILED(hr) ) 
+		throw "Unable to insert new attribute";
+
+
+
+	SKETCH::iterator it;
+	int kk = 0;
+
+
+	CString strpen ;
+
+
+
+	for(kk=0,it=m_sketch.begin();it!=m_sketch.end();++it,kk++)
+	{
+		CBCStroke *stroke = *(it);
+		//笔划循环创建		
+		CComPtr<IXMLDOMNode> spXMLChildNode_StrokeIndex;
+		hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"笔划"),NULL,&spXMLChildNode_StrokeIndex);
+		if ( FAILED(hr) ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+		if ( spXMLChildNode_StrokeIndex.p == NULL ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+
+		CComPtr<IXMLDOMNode> spInsertedNode;
+		hr = spXMLNode_Stroke->appendChild(spXMLChildNode_StrokeIndex,&spInsertedNode);
+		if ( FAILED(hr) ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+		if ( spInsertedNode.p == NULL ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+
+		CComQIPtr<IXMLDOMElement> spXMLElement_StrokeIndex;
+		spXMLElement_StrokeIndex = spXMLChildNode_StrokeIndex;
+		if ( spXMLElement_StrokeIndex.p == NULL ) 
+			throw "Unable to query for 'xmlchildnode' XML element interface";
+		hr = spXMLElement_StrokeIndex->setAttribute(CComBSTR(L"id"),CComVariant(kk));
+		int nbeziertotalnum = stroke->m_bezStroke.size();
+		hr = spXMLElement_StrokeIndex->setAttribute(CComBSTR(L"TotalBezierNum"),CComVariant(nbeziertotalnum));
+		if ( FAILED(hr) ) 
+			throw "Unable to insert new attribute";
+		//笔划下的结点－－颜色循环创建，并赋值
+
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Color;
+		hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"颜色"),NULL,&spXMLChildNode_Stroke_Color);
+		if ( FAILED(hr) ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+		if ( spXMLChildNode_Stroke_Color.p == NULL ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+
+		CComPtr<IXMLDOMNode> spInsertedNode_Color;
+		hr = spXMLElement_StrokeIndex->appendChild(spXMLChildNode_Stroke_Color,&spInsertedNode_Color);
+		if ( FAILED(hr) ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+		if ( spInsertedNode_Color.p == NULL ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+
+		COLORREF color = stroke->GetColor();
+		CString strcolor;
+		strcolor.Format("%d",color);
+		hr = spXMLChildNode_Stroke_Color->put_text(CComBSTR(strcolor.AllocSysString()));
+
+		//笔划下的结点－－区域循环创建，并赋值	
+
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Rect;
+		hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"区域"),NULL,&spXMLChildNode_Stroke_Rect);
+		if ( FAILED(hr) ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+		if ( spXMLChildNode_Stroke_Rect.p == NULL ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+
+		CComPtr<IXMLDOMNode> spInsertedNode_Rect;
+		hr = spXMLElement_StrokeIndex->appendChild(spXMLChildNode_Stroke_Rect,&spInsertedNode_Rect);
+		if ( FAILED(hr) ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+		if ( spInsertedNode_Rect.p == NULL ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+
+		CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Rect;
+		spXMLElement_Stroke_Rect = spXMLChildNode_Stroke_Rect;
+		if ( spXMLElement_Stroke_Rect.p == NULL ) 
+			throw "Unable to query for 'xmlchildnode' XML element interface";
+		CRect rc = stroke->GetRect();
+		hr = spXMLElement_Stroke_Rect->setAttribute(CComBSTR(L"L"),CComVariant(rc.left));
+		hr = spXMLElement_Stroke_Rect->setAttribute(CComBSTR(L"R"),CComVariant(rc.right));
+		hr = spXMLElement_Stroke_Rect->setAttribute(CComBSTR(L"T"),CComVariant(rc.top));
+		hr = spXMLElement_Stroke_Rect->setAttribute(CComBSTR(L"B"),CComVariant(rc.bottom));
+		if ( FAILED(hr) ) 
+			throw "Unable to insert new attribute";
+
+		//笔划下的结点－－笔触循环创建，并赋值		
+
+		CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_PenStyle;
+		hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"笔触"),NULL,&spXMLChildNode_Stroke_PenStyle);
+		if ( FAILED(hr) ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+		if ( spXMLChildNode_Stroke_Rect.p == NULL ) 
+			throw "Unable to create 'xmlchildnode' XML node";
+
+		CComPtr<IXMLDOMNode> spInsertedNode_PenStyle;
+		hr = spXMLElement_StrokeIndex->appendChild(spXMLChildNode_Stroke_PenStyle,&spInsertedNode_PenStyle);
+		if ( FAILED(hr) ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+		if ( spInsertedNode_PenStyle.p == NULL ) 
+			throw "Unable to move 'xmlchildnode' XML node";
+
+		CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_PenStyle;
+		spXMLElement_Stroke_PenStyle = spXMLChildNode_Stroke_PenStyle;
+		if ( spXMLElement_Stroke_PenStyle.p == NULL ) 
+			throw "Unable to query for 'xmlchildnode' XML element interface";
+
+		if(typeid(stroke->GetPaper())==typeid(CDHPaper))
+		{
+			strpen = "circle";
+		}
+		else
+		{
+			strpen = "ellipse";
+		}
+		hr = spXMLChildNode_Stroke_PenStyle->put_text(CComBSTR(strpen.AllocSysString()));
+
+		//笔划下的结点－－轨迹循环创建，并赋值
+
+		BEZIERSTROKE::iterator it1;
+
+		for(it1 = stroke->m_bezStroke.begin();it1!=stroke->m_bezStroke.end();it1++)
+		{
+			BezierPressCurve& bezpCurve  = *it1;
+			//笔划下的结点－－轨迹循环创建，并赋值
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier;
+			hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"轨迹"),NULL,&spXMLChildNode_Stroke_Bezier);
+			if ( FAILED(hr) ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+			if ( spXMLChildNode_Stroke_Bezier.p == NULL ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+
+			CComPtr<IXMLDOMNode> spInsertedNode_Bezier;
+			hr = spXMLElement_StrokeIndex->appendChild(spXMLChildNode_Stroke_Bezier,&spInsertedNode_Bezier);
+			if ( FAILED(hr) ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+			if ( spInsertedNode_Bezier.p == NULL ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+
+			CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier;
+			spXMLElement_Stroke_Bezier = spXMLChildNode_Stroke_Bezier;
+			if ( spXMLElement_Stroke_Bezier.p == NULL ) 
+				throw "Unable to query for 'xmlchildnode' XML element interface";
+			int sz = bezpCurve.numpoint;
+			hr = spXMLElement_Stroke_Bezier->setAttribute(CComBSTR(L"count"),CComVariant(sz));
+			if ( FAILED(hr) ) 
+				throw "Unable to insert new attribute";
+
+			//轨迹下的结点－－控制点循环创建，并赋值			
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_ControlPoints;
+			hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"控制点"),NULL,&spXMLChildNode_Stroke_Bezier_ControlPoints);
+			if ( FAILED(hr) ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+			if ( spXMLChildNode_Stroke_Bezier_ControlPoints.p == NULL ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+
+			CComPtr<IXMLDOMNode> spInsertedNode_Bezier_ControlPoints;
+			hr = spXMLChildNode_Stroke_Bezier->appendChild(spXMLChildNode_Stroke_Bezier_ControlPoints,&spInsertedNode_Bezier_ControlPoints);
+			if ( FAILED(hr) ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+			if ( spInsertedNode_Bezier_ControlPoints.p == NULL ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+
+			CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier_ControlPoints;
+			spXMLElement_Stroke_Bezier_ControlPoints = spXMLChildNode_Stroke_Bezier_ControlPoints;
+			if ( spXMLElement_Stroke_Bezier_ControlPoints.p == NULL ) 
+				throw "Unable to query for 'xmlchildnode' XML element interface";
+			int pointnum = 4;
+			hr = spXMLElement_Stroke_Bezier_ControlPoints->setAttribute(CComBSTR(L"count"),CComVariant(pointnum));
+			if ( FAILED(hr) ) 
+				throw "Unable to insert new attribute";
+			//控制点下结点--point循环创建，并赋值
+
+
+			for(int j=0;j<4;j++)
+			{
+
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_ControlPoints_Point;
+				hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"point"),NULL,&spXMLChildNode_Stroke_Bezier_ControlPoints_Point);
+				if ( FAILED(hr) ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+				if ( spXMLChildNode_Stroke_Bezier_ControlPoints_Point.p == NULL ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+
+				CComPtr<IXMLDOMNode> spInsertedNode_Bezier_ControlPoints_Point;
+				hr = spXMLChildNode_Stroke_Bezier_ControlPoints->appendChild(spXMLChildNode_Stroke_Bezier_ControlPoints_Point,&spInsertedNode_Bezier_ControlPoints_Point);
+				if ( FAILED(hr) ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+				if ( spInsertedNode_Bezier_ControlPoints_Point.p == NULL ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+
+				CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier_ControlPoints_Point;
+				spXMLElement_Stroke_Bezier_ControlPoints_Point = spXMLChildNode_Stroke_Bezier_ControlPoints_Point;
+				if ( spXMLElement_Stroke_Bezier_ControlPoints_Point.p == NULL ) 
+					throw "Unable to query for 'xmlchildnode' XML element interface";
+				int xvalue = bezpCurve.bezCurve[j].x ;
+				int yvalue = bezpCurve.bezCurve[j].y ;
+				hr = spXMLElement_Stroke_Bezier_ControlPoints_Point->setAttribute(CComBSTR(L"x"),CComVariant(xvalue));
+				hr = spXMLElement_Stroke_Bezier_ControlPoints_Point->setAttribute(CComBSTR(L"y"),CComVariant(yvalue));
+				if ( FAILED(hr) ) 
+					throw "Unable to insert new attribute";
+
+
+			}
+
+			//轨迹下的结点－－参数循环创建，并赋值			
+			CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters;
+			hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"参数"),NULL,&spXMLChildNode_Stroke_Bezier_Parameters);
+			if ( FAILED(hr) ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+			if ( spXMLChildNode_Stroke_Bezier_Parameters.p == NULL ) 
+				throw "Unable to create 'xmlchildnode' XML node";
+
+			CComPtr<IXMLDOMNode> spInsertedNode_Bezier_Parameters;
+			hr = spXMLChildNode_Stroke_Bezier->appendChild(spXMLChildNode_Stroke_Bezier_Parameters,&spInsertedNode_Bezier_Parameters);
+			if ( FAILED(hr) ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+			if ( spInsertedNode_Bezier_Parameters.p == NULL ) 
+				throw "Unable to move 'xmlchildnode' XML node";
+
+			CComQIPtr<IXMLDOMElement> spXMLElement_Stroke_Bezier_Parameters;
+			spXMLElement_Stroke_Bezier_Parameters = spXMLChildNode_Stroke_Bezier_Parameters;
+			if ( spXMLElement_Stroke_Bezier_Parameters.p == NULL ) 
+				throw "Unable to query for 'xmlchildnode' XML element interface";
+			int paranum = bezpCurve.uList.size();
+			hr = spXMLElement_Stroke_Bezier_Parameters->setAttribute(CComBSTR(L"count"),CComVariant(paranum));
+			if ( FAILED(hr) ) 
+				throw "Unable to insert new attribute";
+
+			//参数下的结点－－U循环创建，并赋值
+
+			int size=bezpCurve.uList.size();
+			for(int i=0;i<size;++i)
+			{			
+
+				PARAMER a = bezpCurve.uList[i];
+				//参数下的结点－－U循环创建，并赋值
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_U;
+				hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"u"),NULL,&spXMLChildNode_Stroke_Bezier_Parameters_U);
+				if ( FAILED(hr) ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+				if ( spXMLChildNode_Stroke_Bezier_Parameters_U.p == NULL ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+
+				CComPtr<IXMLDOMNode> spInsertedNode_Bezier_Parameters_U;
+				hr = spXMLChildNode_Stroke_Bezier_Parameters->appendChild(spXMLChildNode_Stroke_Bezier_Parameters_U,&spInsertedNode_Bezier_Parameters_U);
+				if ( FAILED(hr) ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+				if ( spInsertedNode_Bezier_Parameters_U.p == NULL ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+
+				double uvalue = a.u;
+				CString str;
+				str.Format("%f",uvalue);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_U->put_text(str.AllocSysString());
+				if ( FAILED(hr) ) 
+					throw "Unable to insert new attribute";
+				//参数下的结点－－Press循环创建，并赋值
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_Press;
+				hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"press"),NULL,&spXMLChildNode_Stroke_Bezier_Parameters_Press);
+				if ( FAILED(hr) ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+				if ( spXMLChildNode_Stroke_Bezier_Parameters_Press.p == NULL ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+
+				CComPtr<IXMLDOMNode> spInsertedNode_Bezier_Parameters_Press;
+				hr = spXMLChildNode_Stroke_Bezier_Parameters->appendChild(spXMLChildNode_Stroke_Bezier_Parameters_Press,&spInsertedNode_Bezier_Parameters_Press);
+				if ( FAILED(hr) ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+				if ( spInsertedNode_Bezier_Parameters_Press.p == NULL ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+
+				int Pressvalue = a.press;
+				str.Format("%d",Pressvalue);
+
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_Press->put_text(str.AllocSysString());
+				if ( FAILED(hr) ) 
+					throw "Unable to insert new attribute";
+
+				//参数下的结点－－angle_xy循环创建，并赋值
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_AngleXY;
+				hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"angle_xy"),NULL,&spXMLChildNode_Stroke_Bezier_Parameters_AngleXY);
+				if ( FAILED(hr) ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+				if ( spXMLChildNode_Stroke_Bezier_Parameters_AngleXY.p == NULL ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+
+				CComPtr<IXMLDOMNode> spInsertedNode_Bezier_Parameters_AngleXY;
+				hr = spXMLChildNode_Stroke_Bezier_Parameters->appendChild(spXMLChildNode_Stroke_Bezier_Parameters_AngleXY,&spInsertedNode_Bezier_Parameters_AngleXY);
+				if ( FAILED(hr) ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+				if ( spInsertedNode_Bezier_Parameters_AngleXY.p == NULL ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+
+
+
+
+				str.Format("%d",a.m_angle_xy);
+				hr = spInsertedNode_Bezier_Parameters_AngleXY->put_text(str.AllocSysString());
+				if ( FAILED(hr) ) 
+					throw "Unable to insert new attribute";
+
+				//参数下的结点－－angle_z循环创建，并赋值
+
+
+				CComPtr<IXMLDOMNode> spXMLChildNode_Stroke_Bezier_Parameters_AngleZ;
+				hr = spXMLDOM->createNode(CComVariant(NODE_ELEMENT),CComBSTR(L"angle_z"),NULL,&spXMLChildNode_Stroke_Bezier_Parameters_AngleZ);
+				if ( FAILED(hr) ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+				if ( spXMLChildNode_Stroke_Bezier_Parameters_AngleZ.p == NULL ) 
+					throw "Unable to create 'xmlchildnode' XML node";
+
+				CComPtr<IXMLDOMNode> spInsertedNode_Bezier_Parameters_AngleZ;
+				hr = spXMLChildNode_Stroke_Bezier_Parameters->appendChild(spXMLChildNode_Stroke_Bezier_Parameters_AngleZ,&spInsertedNode_Bezier_Parameters_AngleZ);
+				if ( FAILED(hr) ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+				if ( spInsertedNode_Bezier_Parameters_AngleZ.p == NULL ) 
+					throw "Unable to move 'xmlchildnode' XML node";
+
+				str.Format("%d",a.m_angle_z);
+				hr = spXMLChildNode_Stroke_Bezier_Parameters_AngleZ->put_text(str.AllocSysString());
+				if ( FAILED(hr) ) 
+					throw "Unable to insert new attribute";
+
+			}
+		}
+
+	}
+
+	hr = spXMLDOM->save(CComVariant(fileName));
+	if ( FAILED(hr) ) 
+		throw "Unable to save updated XML document";
+	CoUninitialize(); 
+}
+
+
+CBCStroke* CSketch::GetStrokeInRgn(POINT point)
+{
+	SKETCH::iterator it;
+	// 遍历处理区域像素
+	for(it=m_sketch.begin();it!=m_sketch.end();++it){
+		if((*it)->IsInRgn(point)){
+			return (*it);
+		}		
+	}
+}
+
+
+
+void CSketch::Add(CBCStroke* lpStroke)
+{
+	m_sketch.push_back(lpStroke);
+}
+void CSketch::Remove(CBCStroke* lpStroke)
+{
+	m_sketch.remove(lpStroke);
+}

@@ -1,0 +1,278 @@
+// MainFrm.cpp : CMainFrame 类的实现
+//
+
+#include "stdafx.h"
+#include "CAMC.h"
+
+#include "MainFrm.h"
+#include ".\mainfrm.h"
+#include "PreviewDlg.h"
+#include "StyleStrokeDB.h"
+#include "StrokeTransform.h"
+
+#ifdef _DEBUG
+#define new DEBUG_NEW
+#endif
+
+
+// CMainFrame
+
+IMPLEMENT_DYNAMIC(CMainFrame, CMDIFrameWnd)
+
+BEGIN_MESSAGE_MAP(CMainFrame, CMDIFrameWnd)
+	ON_WM_CREATE()
+	ON_COMMAND(ID_LAYERBAR, OnLayerbar)
+	ON_WM_MDIACTIVATE()
+
+	ON_COMMAND(ID_PREVIEWDLG, OnPreviewdlg)
+	ON_COMMAND(ID_COLORDBMANAGER, OnColordbmanager)
+END_MESSAGE_MAP()
+
+static UINT indicators[] =
+{
+	ID_SEPARATOR,           // 状态行指示器
+	ID_INDICATOR_CAPS,
+	ID_INDICATOR_NUM,
+	ID_INDICATOR_SCRL,
+};
+
+
+// CMainFrame 构造/析构
+
+CMainFrame::CMainFrame()
+{
+	// TODO: 在此添加成员初始化代码
+}
+
+CMainFrame::~CMainFrame()
+{
+
+}
+
+
+int CMainFrame::OnCreate(LPCREATESTRUCT lpCreateStruct)
+{
+	if (CMDIFrameWnd::OnCreate(lpCreateStruct) == -1)
+		return -1;
+	
+	if (!m_wndToolBar.CreateEx(this, TBSTYLE_FLAT, WS_CHILD | WS_VISIBLE | CBRS_TOP
+		| CBRS_GRIPPER | CBRS_TOOLTIPS | CBRS_FLYBY | CBRS_SIZE_DYNAMIC) ||
+		!m_wndToolBar.LoadToolBar(IDR_MAINFRAME))
+	{
+		TRACE0("未能创建工具栏\n");
+		return -1;      // 未能创建
+	}
+	if (!m_wndStatusBar.Create(this) ||
+		!m_wndStatusBar.SetIndicators(indicators,
+		  sizeof(indicators)/sizeof(UINT)))
+	{
+		TRACE0("未能创建状态栏\n");
+		return -1;      // 未能创建
+	}
+
+	CreateLayerBar();
+	
+	// TODO: 如果不需要工具栏可停靠，则删除这三行
+	
+	m_wndToolBar.EnableDocking(CBRS_ALIGN_ANY);
+	EnableDocking(CBRS_ALIGN_ANY);
+	DockControlBar(&m_wndToolBar);
+	DockControlBar(&m_fcLayerBar);
+	
+	CreateBar();//创建dlgbar;
+
+
+	if (!m_selectToolBar.Create(this,WS_CHILD | WS_VISIBLE 
+		| CBRS_SIZE_FIXED | CBRS_TOP |  CBRS_TOOLTIPS)
+		||!m_selectToolBar.LoadToolBar(IDR_SELECTTOOLBAR))
+	{
+		TRACE0("Failed to create toolbar\n");
+		return -1;      // fail to create
+	}
+	m_selectToolBar.SetWindowText(_T(""));
+	m_selectToolBar.EnableDocking(CBRS_ALIGN_ANY);
+	EnableDocking(CBRS_ALIGN_ANY);
+	DockControlBar(&m_selectToolBar);
+	CPoint pt(0,70);
+	int nCount = m_selectToolBar.GetToolBarCtrl().GetButtonCount();
+	for (int i = 0; i < nCount; i++)
+	{
+		UINT nStyle = m_selectToolBar.GetButtonStyle(i);
+		BOOL bWrap = (((i + 1) % 2) == 0);
+		if (bWrap)
+			nStyle |= TBBS_WRAPPED;
+		else
+			nStyle &= ~TBBS_WRAPPED;
+		m_selectToolBar.SetButtonStyle(i, nStyle);
+	}
+	m_selectToolBar.Invalidate();
+	RecalcLayout();
+	FloatControlBar(&m_selectToolBar, pt);
+
+//显示缩略图
+	m_pPreviewDlg=new CPreviewDlg();
+	m_pPreviewDlg->Create(IDD_DLGPREVEIW,this);	
+	TCHAR tmp[100];
+	int len=::GetCurrentDirectory(100,tmp);
+	m_dbPath=tmp;
+	m_path.Format("%s",tmp);
+	CString pathTmp;
+	pathTmp.Format("%s\\图片",tmp);
+	::CreateDirectory(pathTmp,NULL);
+	InitStyleStroke();
+
+	m_pColorDlg=new CColorDBManagerDlg(&m_ColorDB,tmp);
+	m_pColorDlg->Create(IDD_COLORDBMANAGER,this);
+	return 0;
+}
+
+BOOL CMainFrame::PreCreateWindow(CREATESTRUCT& cs)
+{
+	if( !CMDIFrameWnd::PreCreateWindow(cs) )
+		return FALSE;
+	// TODO: 在此处通过修改 CREATESTRUCT cs 来修改窗口类或
+	// 样式
+
+	return TRUE;
+}
+
+
+// CMainFrame 诊断
+
+#ifdef _DEBUG
+void CMainFrame::AssertValid() const
+{
+	CMDIFrameWnd::AssertValid();
+}
+
+void CMainFrame::Dump(CDumpContext& dc) const
+{
+	CMDIFrameWnd::Dump(dc);
+}
+
+#endif //_DEBUG
+
+
+// CMainFrame 消息处理程序
+//------------------------------------------
+//显示图层工具栏
+void CMainFrame::OnLayerbar()
+{
+	// TODO: 在此添加命令处理程序代码
+}
+void CMainFrame::CreateLayerBar()
+{
+	if(!m_fcLayerBar.Create(this,IDD_LAYERDLG,WS_CHILD|WS_VISIBLE|CBRS_RIGHT
+						|CBRS_TOOLTIPS|CBRS_FLYBY,IDD_LAYERDLG))
+	{		  
+		TRACE0("Failed to create dialogbar\n");
+		return;
+	}
+	m_fcLayerBar.EnableDocking(CBRS_ALIGN_ANY);
+}
+void CMainFrame::OnMDIActivate(BOOL bActivate, CWnd* pActivateWnd, CWnd* pDeactivateWnd)
+{
+	CMDIFrameWnd::OnMDIActivate(bActivate, pActivateWnd, pDeactivateWnd);
+
+	// TODO: 在此处添加消息处理程序代码
+}
+
+
+
+
+void CMainFrame::OnPreviewdlg()
+{
+	int cscy = ::GetSystemMetrics(SM_CYSCREEN) / 4*3; 
+	int cscx = ::GetSystemMetrics(SM_CXSCREEN) / 4*3; 
+	CRect rect;
+	m_pPreviewDlg->GetWindowRect(&rect);
+	m_pPreviewDlg->MoveWindow(cscx*4/3-rect.Width(),cscy*4/3-rect.Height()-25,rect.Width(),rect.Height());
+	m_pPreviewDlg->ShowWindow(SW_SHOW);
+
+}
+
+CDocument* CMainFrame::GetActiveDocument()
+{
+	// TODO: Add your specialized code here and/or call the base class
+	this->m_fcLayerBar.InitImageList();
+	return CMDIFrameWnd::GetActiveDocument();
+	
+}
+
+void CMainFrame::OnColordbmanager()
+{
+	// TODO: Add your command handler code here
+	//生存敦煌颜色管理对话框
+	m_pColorDlg->ShowWindow(SW_SHOW);
+}
+void CMainFrame::CreateBar()
+{
+	CPoint pt(100,670);
+
+		if(!m_dlgbar_none.Create(this,IDD_DIALOG_NONE,CBRS_BOTTOM,IDD_DIALOG_NONE))
+		{		  
+			TRACE0("Failed to create dialogbar\n");
+			return ;
+		}
+		m_dlgbar_none.EnableDocking(CBRS_ALIGN_ANY);
+		DockControlBar(&m_dlgbar_none);
+		m_dlgbar_none.Invalidate();
+		FloatControlBar(&m_dlgbar_none, pt);
+		this->ShowControlBar(&m_dlgbar_none,FALSE,FALSE);
+
+
+		if(!m_dlgbar_pen.Create(this,IDD_DIALOG_PEN,CBRS_BOTTOM,IDD_DIALOG_PEN))
+		{		  
+			TRACE0("Failed to create dialogbar\n");
+			return ;
+		}
+		m_dlgbar_pen.EnableDocking(CBRS_ALIGN_ANY);
+		DockControlBar(&m_dlgbar_pen);
+		m_dlgbar_pen.Invalidate();
+		FloatControlBar(&m_dlgbar_pen, pt);
+		this->ShowControlBar(&m_dlgbar_pen,FALSE,FALSE);
+
+		
+		if(!m_dlgbar_linerelated.Create(this,IDD_DIALOG_LINERELATED,CBRS_BOTTOM,IDD_DIALOG_LINERELATED))
+		{		  
+			TRACE0("Failed to create dialogbar\n");
+			return ;
+		}
+		m_dlgbar_linerelated.EnableDocking(CBRS_ALIGN_ANY);
+		DockControlBar(&m_dlgbar_linerelated);
+		m_dlgbar_linerelated.Invalidate();
+		FloatControlBar(&m_dlgbar_linerelated, pt);
+		this->ShowControlBar(&m_dlgbar_linerelated,FALSE,FALSE);
+
+		
+		if(!m_dlgbar_magic.Create(this,IDD_DIALOG_MAGIC,CBRS_BOTTOM,IDD_DIALOG_MAGIC))
+		{		  
+			TRACE0("Failed to create dialogbar\n");
+			return ;
+		}
+		m_dlgbar_magic.EnableDocking(CBRS_ALIGN_ANY);
+		DockControlBar(&m_dlgbar_magic);
+		m_dlgbar_magic.Invalidate();
+		FloatControlBar(&m_dlgbar_magic, pt);
+		this->ShowControlBar(&m_dlgbar_magic,FALSE,FALSE);
+
+				
+		if(!m_dlgbar_color.Create(this,IDD_DIALOG_COLOR,CBRS_BOTTOM,IDD_DIALOG_COLOR))
+		{		  
+			TRACE0("Failed to create dialogbar\n");
+			return ;
+		}
+		m_dlgbar_color.EnableDocking(CBRS_ALIGN_ANY);
+		DockControlBar(&m_dlgbar_color);
+		m_dlgbar_color.Invalidate();
+		FloatControlBar(&m_dlgbar_color, pt);
+		this->ShowControlBar(&m_dlgbar_color,FALSE,FALSE);
+
+}
+void CMainFrame::InitStyleStroke()
+{
+	CString strokePath;
+	strokePath.Format("%s\\StyleStroke.xml",m_path);
+	CStyleStrokeDB::Instance()->Load(strokePath);
+	CStyleStrokeDB::Instance()->SetSaveFilePath(m_path);
+}
